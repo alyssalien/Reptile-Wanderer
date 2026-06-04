@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>🦎 Reptile Wanderer — 爬蟲出沒注意！</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+<!-- ===== HEADER ===== -->
+<header class="site-header">
+  <div class="header-inner">
+    <div class="logo">🦎 <span>Reptile Wanderer</span></div>
+    <div class="tagline">爬蟲出沒注意！—— 專為爬蟲類主人打造的智慧散步地圖</div>
+  </div>
+</header>
+
+<!-- ===== WEATHER BANNER (shown by JS) ===== -->
+<div id="weather-banner" class="weather-banner hidden"></div>
+
+<!-- ===== CONTROL PANEL ===== -->
+<section class="control-panel">
+  <div class="control-inner">
+
+    <!-- Row 1: Address + Search -->
+    <div class="control-row address-row">
+      <input
+        type="text" id="address-input"
+        class="address-input"
+        placeholder="輸入起點地址或地標（例如：清華大學台達館）"
+        autocomplete="off"
+      />
+      <button id="search-btn" class="btn btn-primary" onclick="doSearch()">
+        🔍 搜尋
+      </button>
+    </div>
+
+    <!-- Row 2: Species mode -->
+    <div class="control-row">
+      <span class="ctrl-label">寵物物種：</span>
+      <div class="species-group">
+        <button class="species-btn active" data-species="gecko" onclick="selectSpecies(this)">
+          🦎 守宮 / 蜥蜴
+        </button>
+        <button class="species-btn" data-species="tortoise" onclick="selectSpecies(this)">
+          🐢 陸龜
+        </button>
+        <button class="species-btn" data-species="beardie" onclick="selectSpecies(this)">
+          🦕 鬃獅蜥
+        </button>
+      </div>
+    </div>
+
+    <!-- Row 3: Walk time + Categories -->
+    <div class="control-row flex-wrap">
+      <span class="ctrl-label">最長步行時間：</span>
+      <select id="max-walk" class="select-input">
+        <option value="5">5 分鐘</option>
+        <option value="10">10 分鐘</option>
+        <option value="15" selected>15 分鐘</option>
+        <option value="20">20 分鐘</option>
+      </select>
+
+      <span class="ctrl-label" style="margin-left:16px;">地點類別：</span>
+      <div class="category-group">
+        <label class="cat-label"><input type="checkbox" value="park" checked /> 🌳 公園</label>
+        <label class="cat-label"><input type="checkbox" value="grass" checked /> 🌾 草地</label>
+        <label class="cat-label"><input type="checkbox" value="forest" /> 🌲 森林</label>
+        <label class="cat-label"><input type="checkbox" value="campus" /> 🏫 校園</label>
+        <label class="cat-label"><input type="checkbox" value="convenience" /> 🏪 便利商店</label>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ===== MAP ===== -->
+<section class="map-section">
+  <div class="map-status" id="map-status">
+    <span id="map-status-text">請輸入起點並按下搜尋 🗺️</span>
+    <span id="loading-spinner" class="spinner hidden"></span>
+  </div>
+  <iframe
+    id="map-frame"
+    src="/map"
+    class="map-frame"
+    title="互動式地圖"
+    frameborder="0"
+  ></iframe>
+</section>
+
+<!-- ===== RESULTS PANEL ===== -->
+<section class="results-section" id="results-section" style="display:none;">
+  <div class="results-header">
+    <h2 id="results-title">搜尋結果</h2>
+    <div class="results-actions">
+      <button class="btn btn-secondary" id="select-all-btn" onclick="toggleSelectAll()" style="display:none;">
+        全選
+      </button>
+      <button class="btn btn-accent" id="optimize-btn" onclick="doOptimize()" style="display:none;">
+        🗺️ 規劃多站點最佳路線
+      </button>
+    </div>
+  </div>
+  <div id="multi-stop-summary" class="multi-stop-summary hidden"></div>
+  <div id="results-list" class="results-list"></div>
+  <p class="results-note">
+    ⚠️ 評分資料來源為 OpenStreetMap，若無資料則以物種模式加分替代排序。步行時間由 OSRM 實際路徑計算，非直線距離。
+  </p>
+</section>
+
+<!-- ===== COMMUNITY REPORT PANEL ===== -->
+<section class="report-section">
+  <button class="report-toggle-btn" onclick="toggleReport()">
+    📢 社群回報 <span id="report-toggle-icon">▼</span>
+  </button>
+
+  <div id="report-panel" class="report-panel hidden">
+    <div class="report-form-grid">
+
+      <div class="form-group">
+        <label for="r-location">📍 地點名稱</label>
+        <input type="text" id="r-location" placeholder="加城市更精準，例如：成功湖 新竹" />
+      </div>
+
+      <div class="form-group">
+        <label for="r-type">回報類型</label>
+        <div class="report-type-group">
+          <label class="type-radio">
+            <input type="radio" name="report-type" value="danger" checked />
+            <span class="type-badge danger">⚠️ 危險</span>
+          </label>
+          <label class="type-radio">
+            <input type="radio" name="report-type" value="recommend" />
+            <span class="type-badge recommend">✅ 推薦</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="form-group full-width">
+        <label for="r-desc">📝 描述</label>
+        <textarea id="r-desc" rows="2"
+          placeholder="例如：清大成功湖畔剛剛有三隻沒牽繩的黃狗（危險！）"></textarea>
+      </div>
+
+      <div class="form-group full-width">
+        <button class="btn btn-primary" onclick="submitReport()">送出回報</button>
+        <span id="report-feedback" class="report-feedback"></span>
+      </div>
+
+    </div>
+
+    <div class="report-examples">
+      <p class="example-title">回報範例：</p>
+      <p class="example danger-ex" onclick="fillExample('danger','清大成功湖畔','清大成功湖畔剛剛有三隻沒牽繩的黃狗（危險！）')">
+        🐕 「清大成功湖畔剛剛有三隻沒牽繩的黃狗（危險！）」
+      </p>
+      <p class="example recommend-ex" onclick="fillExample('recommend','大草坪','大草坪今天剛剛除過草，很乾淨，適合陸龜（推薦！）')">
+        🌿 「大草坪今天剛剛除過草，很乾淨，適合陸龜（推薦！）」
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ===== FOOTER ===== -->
+<footer class="site-footer">
+  <p>Reptile Wanderer © 2026 &nbsp;｜&nbsp; 113590030 鄧伊翎 &amp; 113590037 張婕茵</p>
+  <p style="font-size:12px;opacity:.7;">地圖資料：© OpenStreetMap contributors | 路徑計算：OSRM | 天氣資料：Open-Meteo</p>
+</footer>
+
+<script>
+// ===================== STATE =====================
+let currentSpecies = 'gecko';
+let lastOrigin = null;
+let lastResults = [];
+let mapRefreshInterval = null;
+
+// ===================== SPECIES =====================
+function selectSpecies(btn) {
+  document.querySelectorAll('.species-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentSpecies = btn.dataset.species;
+}
+
+// ===================== SEARCH =====================
+async function doSearch() {
+  const address = document.getElementById('address-input').value.trim();
+  if (!address) {
+    showStatus('請輸入起點地址', 'warn');
+    return;
+  }
+
+  const categories = Array.from(
+    document.querySelectorAll('.category-group input:checked')
+  ).map(el => el.value);
+  if (categories.length === 0) {
+    showStatus('請至少選擇一個地點類別', 'warn');
+    return;
+  }
+
+  const maxWalk = parseInt(document.getElementById('max-walk').value);
+
+  setLoading(true);
+  showStatus('搜尋中，請稍候⋯⋯（OSRM 路徑計算需要數秒）', 'info');
+
+  try {
+    const res = await fetch('/search', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        address,
+        species: currentSpecies,
+        max_walk_min: maxWalk,
+        categories,
+      }),
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      showStatus(data.error || '搜尋失敗', 'error');
+      return;
+    }
+
+    lastOrigin = data.origin;
+    lastResults = data.results;
+    renderResults(data.results, data.weather);
+    updateWeatherBanner(data.weather);
+    refreshMap();
+    startAutoRefresh();
+    showStatus(`找到 ${data.total_found} 個符合條件的地點`, 'ok');
+  } catch (err) {
+    showStatus('網路錯誤，請確認連線後重試', 'error');
+  } finally {
+    setLoading(false);
+  }
+}
+
+// ===================== RESULTS =====================
+const CATEGORY_LABEL = {
+  park: '公園', grass: '草地', forest: '森林',
+  convenience: '便利商店', campus: '校園',
+};
+const SPECIES_EMOJI = {gecko: '🦎', tortoise: '🐢', beardie: '🦕'};
+
+function renderResults(results, weather) {
+  const section = document.getElementById('results-section');
+  const list = document.getElementById('results-list');
+  const title = document.getElementById('results-title');
+  const selectBtn = document.getElementById('select-all-btn');
+  const optimizeBtn = document.getElementById('optimize-btn');
+
+  section.style.display = 'block';
+  title.textContent = `搜尋結果（共 ${results.length} 筆）`;
+  selectBtn.style.display = results.length > 1 ? 'inline-flex' : 'none';
+  optimizeBtn.style.display = results.length > 1 ? 'inline-flex' : 'none';
+
+  if (results.length === 0) {
+    list.innerHTML = '<p class="no-results">此條件下找不到任何地點，請調整步行時間或類別。</p>';
+    return;
+  }
+
+  const emoji = SPECIES_EMOJI[currentSpecies] || '🐾';
+  list.innerHTML = results.map((r, i) => {
+    const shaded = r.is_shaded
+      ? '<span class="tag shaded">✅ 有遮蔭</span>'
+      : '<span class="tag unshaded">☀️ 無遮蔭</span>';
+    const rating = r.rating ? `⭐ ${r.rating}` : '⭐ -';
+    const isHotWarn = weather?.is_hot && !r.is_shaded && currentSpecies === 'gecko'
+      ? '<span class="tag hot-warn">🔥 高溫注意</span>' : '';
+    return `
+      <div class="result-card" data-idx="${i}">
+        <label class="result-checkbox-wrap">
+          <input type="checkbox" class="result-checkbox" data-idx="${i}" onchange="onStopToggle()" />
+        </label>
+        <div class="result-rank">${emoji} #${i + 1}</div>
+        <div class="result-body">
+          <div class="result-name">${r.name}</div>
+          <div class="result-tags">
+            <span class="tag cat-tag">${CATEGORY_LABEL[r.category] || r.category}</span>
+            ${shaded}${isHotWarn}
+            ${rating}
+          </div>
+          <div class="result-meta">
+            🚶 <b>${r.walk_min} 分鐘</b> &nbsp;|&nbsp; 📏 ${r.distance_m} 公尺
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function onStopToggle() {
+  const checked = document.querySelectorAll('.result-checkbox:checked').length;
+  const btn = document.getElementById('optimize-btn');
+  btn.style.display = checked >= 2 ? 'inline-flex' : 'inline-flex';
+  btn.textContent = checked >= 2
+    ? `🗺️ 規劃 ${checked} 站點最佳路線`
+    : '🗺️ 規劃多站點最佳路線';
+}
+
+let allSelected = false;
+function toggleSelectAll() {
+  allSelected = !allSelected;
+  document.querySelectorAll('.result-checkbox').forEach(cb => { cb.checked = allSelected; });
+  document.getElementById('select-all-btn').textContent = allSelected ? '取消全選' : '全選';
+  onStopToggle();
+}
+
+// ===================== MULTI-STOP OPTIMIZE =====================
+async function doOptimize() {
+  const checked = Array.from(document.querySelectorAll('.result-checkbox:checked'));
+  if (checked.length < 2) {
+    showStatus('請至少勾選 2 個目的地', 'warn');
+    return;
+  }
+
+  const stops = checked.map(cb => lastResults[parseInt(cb.dataset.idx)]);
+  setLoading(true);
+  showStatus('計算最佳路線中⋯⋯', 'info');
+
+  try {
+    const res = await fetch('/optimize', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({stops}),
+    });
+    const data = await res.json();
+    if (!res.ok) { showStatus(data.error || '路線計算失敗', 'error'); return; }
+
+    const summary = document.getElementById('multi-stop-summary');
+    summary.classList.remove('hidden');
+    summary.innerHTML =
+      `<b>🗺️ 多站點最佳路線</b>｜建議順序：` +
+      data.ordered_stops.map((s, i) => `<b>${i + 1}.</b> ${s.name}（${s.walk_min} 分）`).join(' → ') +
+      `<br>總步行時間：<b>${data.total_walk_min} 分鐘</b>`;
+
+    refreshMap();
+    showStatus(`多站點路線規劃完成，總時間 ${data.total_walk_min} 分鐘`, 'ok');
+  } catch {
+    showStatus('網路錯誤', 'error');
+  } finally {
+    setLoading(false);
+  }
+}
+
+// ===================== COMMUNITY REPORT =====================
+function toggleReport() {
+  const panel = document.getElementById('report-panel');
+  const icon = document.getElementById('report-toggle-icon');
+  panel.classList.toggle('hidden');
+  icon.textContent = panel.classList.contains('hidden') ? '▼' : '▲';
+}
+
+function fillExample(type, location, desc) {
+  document.querySelector(`input[name="report-type"][value="${type}"]`).checked = true;
+  document.getElementById('r-location').value = location;
+  document.getElementById('r-desc').value = desc;
+}
+
+async function submitReport() {
+  const locationName = document.getElementById('r-location').value.trim();
+  const reportType = document.querySelector('input[name="report-type"]:checked')?.value;
+  const description = document.getElementById('r-desc').value.trim();
+  const feedback = document.getElementById('report-feedback');
+
+  if (!locationName || !description) {
+    feedback.textContent = '請填寫地點名稱和描述';
+    feedback.className = 'report-feedback error';
+    return;
+  }
+
+  try {
+    const res = await fetch('/report', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({location_name: locationName, report_type: reportType, description}),
+    });
+    const data = await res.json();
+    feedback.textContent = data.message;
+    feedback.className = `report-feedback ${data.success ? 'ok' : 'error'}`;
+    if (data.success) {
+      document.getElementById('r-location').value = '';
+      document.getElementById('r-desc').value = '';
+      setTimeout(() => { refreshMap(); }, 1500);
+    }
+  } catch {
+    feedback.textContent = '送出失敗，請稍後再試';
+    feedback.className = 'report-feedback error';
+  }
+}
+
+// ===================== WEATHER BANNER =====================
+function updateWeatherBanner(weather) {
+  const banner = document.getElementById('weather-banner');
+  if (!weather) { banner.classList.add('hidden'); return; }
+
+  let msg = '';
+  if (weather.is_hot && weather.temperature != null) {
+    msg += `⚠️ 目前氣溫 ${weather.temperature}°C — `;
+    if (currentSpecies === 'gecko') msg += '高溫警示！無遮蔭路段已標示，守宮請優先選擇遮蔭地點。';
+    else msg += '注意防曬與補水。';
+    banner.className = 'weather-banner hot';
+  } else if (weather.temperature != null) {
+    msg = `🌤️ 目前氣溫 ${weather.temperature}°C`;
+    if (weather.humidity != null) msg += `，濕度 ${weather.humidity}%`;
+    if (weather.uv_index != null) msg += `，UV 指數 ${weather.uv_index}`;
+    banner.className = 'weather-banner normal';
+  } else {
+    banner.classList.add('hidden');
+    return;
+  }
+  banner.textContent = msg;
+  banner.classList.remove('hidden');
+}
+
+// ===================== MAP REFRESH =====================
+function refreshMap() {
+  const frame = document.getElementById('map-frame');
+  frame.src = `/map?t=${Date.now()}`;
+}
+
+function startAutoRefresh() {
+  if (mapRefreshInterval) clearInterval(mapRefreshInterval);
+  mapRefreshInterval = setInterval(refreshMap, 60000);
+}
+
+// ===================== UI HELPERS =====================
+function showStatus(msg, type = 'info') {
+  const el = document.getElementById('map-status-text');
+  el.textContent = msg;
+  el.className = `status-${type}`;
+}
+
+function setLoading(on) {
+  const spinner = document.getElementById('loading-spinner');
+  const btn = document.getElementById('search-btn');
+  spinner.classList.toggle('hidden', !on);
+  btn.disabled = on;
+  btn.textContent = on ? '搜尋中⋯' : '🔍 搜尋';
+}
+
+// Allow Enter key to trigger search
+document.getElementById('address-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doSearch();
+});
+</script>
+</body>
+</html>
