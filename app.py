@@ -153,12 +153,14 @@ def search():
     # 5. Community reports
     danger_reports, recommend_reports = get_active_reports()
 
-    # 6. Filter & rank
+    # 6. Filter & rank, then keep only the top 20 most suitable
     ranked = filter_and_rank(
         candidates, species, max_walk_min,
         weather["is_hot"], weather.get("uv_index", 0), weather.get("humidity", 60),
         danger_reports, recommend_reports,
     )
+    total_matched = len(ranked)
+    ranked = ranked[:20]
 
     # 7. Fetch route geometry only for the #1 destination (table has no shapes)
     top_geometry = None
@@ -192,6 +194,7 @@ def search():
             "lon": r["lon"],
             "is_shaded": r.get("is_shaded", False),
             "rating": r.get("rating", 0),
+            "suitability": r.get("suitability", 0),
             "species_score": round(r.get("species_score", 0), 2),
         }
         for r in ranked
@@ -202,6 +205,7 @@ def search():
         "weather": weather,
         "origin": origin,
         "total_found": len(results),
+        "total_matched": total_matched,
     })
 
 

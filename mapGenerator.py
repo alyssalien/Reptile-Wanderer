@@ -177,7 +177,8 @@ def build_map(origin, ranked_candidates, species, weather,
             f"🏷️ {CATEGORY_LABEL.get(c['category'], c['category'])}&nbsp;&nbsp;{shaded_txt}<br>"
             f"🚶 步行時間: <b>{c['walk_min']:.1f} 分鐘</b><br>"
             f"📏 距離: {c.get('distance_m', 0):.0f} 公尺<br>"
-            f"⭐ 評分: {c.get('rating') or '（無資料）'}"
+            f"🎯 適合度: <b>{c.get('suitability', '-')}</b> / 5<br>"
+            f"⭐ OSM 評分: {c.get('rating') or '（無資料）'}"
             f"</div>"
         )
         folium.Marker(

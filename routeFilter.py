@@ -51,6 +51,17 @@ UV_GOOD_BEARDIE = 3  # beardie and tortoise benefit from moderate UV exposure
 # so it nudges ranking without burying a better species-fit destination.
 RATING_WEIGHT = 0.4
 
+# Map the raw species_score onto a friendly 1.0–5.0 "suitability" rating for display.
+# The raw score realistically spans roughly -2 (penalised/poor fit) to +6 (ideal habitat).
+SUITABILITY_LO = -2.0
+SUITABILITY_HI = 6.0
+
+
+def _suitability_stars(score):
+    clamped = max(SUITABILITY_LO, min(SUITABILITY_HI, score))
+    frac = (clamped - SUITABILITY_LO) / (SUITABILITY_HI - SUITABILITY_LO)
+    return round(1.0 + 4.0 * frac, 1)   # 1.0 .. 5.0
+
 
 def _haversine_m(lat1, lon1, lat2, lon2):
     R = 6_371_000
@@ -120,6 +131,8 @@ def filter_and_rank(candidates, species, max_walk_min, is_hot, uv_index, humidit
         base = _species_score(c, species, is_hot, uv_index, danger_reports, recommend_reports)
         # Fold the (usually sparse) OSM rating in as a bonus rather than the top key
         c["species_score"] = base + c.get("rating", 0) * RATING_WEIGHT
+        # Friendly 1–5 suitability rating for display
+        c["suitability"] = _suitability_stars(c["species_score"])
 
     # Sort by: 1) species_score desc (rating already baked in)  2) walk_min asc
     valid.sort(key=lambda c: (-c["species_score"], c["walk_min"]))

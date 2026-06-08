@@ -73,6 +73,23 @@ def test_haversine_zero_distance():
     assert rf._haversine_m(24.8, 121.0, 24.8, 121.0) == 0
 
 
+# --- Suitability 1–5 rating ---------------------------------------------------
+def test_suitability_within_1_to_5():
+    cands = [_c(name="ideal", category="forest", is_shaded=True),
+             _c(name="poor", category="convenience", is_shaded=False)]
+    ranked = rf.filter_and_rank(cands, "gecko", 15, True, 8, 60, [], [])
+    for c in ranked:
+        assert 1.0 <= c["suitability"] <= 5.0
+
+
+def test_better_fit_scores_higher():
+    cands = [_c(name="shade", category="forest", is_shaded=True),
+             _c(name="sun", category="grass", is_shaded=False)]
+    ranked = rf.filter_and_rank(cands, "gecko", 15, False, 0, 60, [], [])
+    by_name = {c["name"]: c["suitability"] for c in ranked}
+    assert by_name["shade"] > by_name["sun"]   # ideal gecko habitat rated higher
+
+
 # --- Per-species habitat preference (rank, don't exclude) ---------------------
 def test_gecko_prefers_shade_but_keeps_unshaded():
     cands = [_c(name="sun", is_shaded=False), _c(name="shade", is_shaded=True)]

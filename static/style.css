@@ -305,6 +305,9 @@ body {
   font-size: .78rem;
   font-weight: 600;
 }
+.suit-tag   { background: #fef3c7; color: #92400e; }
+.suit-tag .stars { color: #f59e0b; letter-spacing: 1px; }
+.osm-rating { background: #eef2ff; color: #3730a3; }
 .cat-tag    { background: var(--green-pale); color: var(--green-dark); }
 .shaded     { background: #d1fae5; color: #065f46; }
 .unshaded   { background: #fef9c3; color: #92400e; }

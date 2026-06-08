@@ -243,11 +243,15 @@ async function doSearch() {
 
     lastOrigin = data.origin;
     lastResults = data.results;
-    renderResults(data.results, data.weather);
+    renderResults(data.results, data.weather, data.total_matched);
     updateWeatherBanner(data.weather);
     refreshMap();
     startAutoRefresh();
-    showStatus(`找到 ${data.total_found} 個符合條件的地點`, 'ok');
+    const matched = data.total_matched ?? data.total_found;
+    const shownMsg = matched > data.results.length
+      ? `共 ${matched} 個符合，依適合度顯示前 ${data.results.length} 名`
+      : `找到 ${matched} 個符合條件的地點`;
+    showStatus(shownMsg, 'ok');
   } catch (err) {
     showStatus('網路錯誤，請確認連線後重試', 'error');
   } finally {
@@ -262,7 +266,12 @@ const CATEGORY_LABEL = {
 };
 const SPECIES_EMOJI = {gecko: '🦎', tortoise: '🐢', beardie: '🦕'};
 
-function renderResults(results, weather) {
+function renderStars(score) {
+  const full = Math.round(score || 0);
+  return '★'.repeat(full) + '☆'.repeat(5 - full);
+}
+
+function renderResults(results, weather, totalMatched) {
   const section = document.getElementById('results-section');
   const list = document.getElementById('results-list');
   const title = document.getElementById('results-title');
@@ -270,7 +279,10 @@ function renderResults(results, weather) {
   const optimizeBtn = document.getElementById('optimize-btn');
 
   section.style.display = 'block';
-  title.textContent = `搜尋結果（共 ${results.length} 筆）`;
+  const matched = totalMatched ?? results.length;
+  title.textContent = matched > results.length
+    ? `搜尋結果（共 ${matched} 筆，依適合度顯示前 ${results.length} 名）`
+    : `搜尋結果（共 ${results.length} 筆）`;
   selectBtn.style.display = results.length > 1 ? 'inline-flex' : 'none';
   optimizeBtn.style.display = results.length > 1 ? 'inline-flex' : 'none';
 
@@ -296,9 +308,10 @@ function renderResults(results, weather) {
         <div class="result-body" onclick="flyToResult(${i})" title="點擊在地圖上定位">
           <div class="result-name">${r.name}</div>
           <div class="result-tags">
+            <span class="tag suit-tag" title="依物種習性計算的適合度">🎯 適合度 <b>${r.suitability ?? '-'}</b>/5 <span class="stars">${renderStars(r.suitability)}</span></span>
             <span class="tag cat-tag">${CATEGORY_LABEL[r.category] || r.category}</span>
             ${shaded}${isHotWarn}
-            ${rating}
+            <span class="tag osm-rating">OSM ${rating}</span>
           </div>
           <div class="result-meta">
             🚶 <b>${r.walk_min} 分鐘</b> &nbsp;|&nbsp; 📏 ${r.distance_m} 公尺
