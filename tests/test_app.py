@@ -80,3 +80,27 @@ def test_search_then_optimize(client):
 def test_vote_unknown_report(client):
     r = client.post("/vote", json={"report_id": "nope", "vote_type": "up"})
     assert r.get_json()["success"] is False
+
+
+def test_optimize_rejects_too_many_stops(client):
+    client.post("/search", json={"address": "清華大學", "species": "gecko",
+                                 "max_walk_min": 15, "categories": ["park"]})
+    stops = [{"name": f"S{i}", "lat": 24.8 + i / 1000, "lon": 121.0, "walk_min": 5}
+             for i in range(6)]   # 6 > MAX_STOPS (5)
+    r = client.post("/optimize", json={"stops": stops})
+    assert r.status_code == 400
+    assert "最多" in r.get_json()["error"]
+
+
+def test_reports_board_lists_active(client):
+    import communityHandler as ch
+    ch.add_report({"location_name": "成功湖", "report_type": "danger",
+                   "description": "有狗", "lat": 24.79, "lon": 120.99})
+    ch.add_report({"location_name": "大草坪", "report_type": "recommend",
+                   "description": "乾淨", "lat": 24.80, "lon": 121.00})
+    r = client.get("/reports")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["total"] == 2
+    types = {x["report_type"] for x in body["reports"]}
+    assert types == {"danger", "recommend"}

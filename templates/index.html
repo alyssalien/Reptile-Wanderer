@@ -145,7 +145,8 @@
       </div>
 
       <div class="form-group full-width">
-        <button class="btn btn-primary" onclick="submitReport()">送出回報</button>
+        <button class="btn btn-primary" id="report-submit-btn" onclick="submitReport()">送出回報</button>
+        <span id="report-spinner" class="spinner hidden"></span>
         <span id="report-feedback" class="report-feedback"></span>
       </div>
 
@@ -160,6 +161,18 @@
         🌿 「大草坪今天剛剛除過草，很乾淨，適合陸龜（推薦！）」
       </p>
     </div>
+  </div>
+</section>
+
+<!-- ===== MESSAGE BOARD ===== -->
+<section class="board-section">
+  <div class="board-header">
+    <h2>📋 社群留言板</h2>
+    <button class="btn btn-secondary" onclick="loadReports()">🔄 重新整理</button>
+  </div>
+  <p class="board-note">所有有效的危險 / 推薦回報都會列在這裡（過期會自動移除）。可在此對回報投票。</p>
+  <div id="board-list" class="board-list">
+    <p class="board-empty">載入中⋯</p>
   </div>
 </section>
 
@@ -271,7 +284,7 @@ function renderResults(results, weather) {
     return `
       <div class="result-card" data-idx="${i}">
         <label class="result-checkbox-wrap">
-          <input type="checkbox" class="result-checkbox" data-idx="${i}" onchange="onStopToggle()" />
+          <input type="checkbox" class="result-checkbox" data-idx="${i}" onchange="onStopToggle(this)" />
         </label>
         <div class="result-rank">${emoji} #${i + 1}</div>
         <div class="result-body" onclick="flyToResult(${i})" title="點擊在地圖上定位">
@@ -290,20 +303,30 @@ function renderResults(results, weather) {
   }).join('');
 }
 
-function onStopToggle() {
-  const checked = document.querySelectorAll('.result-checkbox:checked').length;
+const MAX_STOPS = 5;  // keep route analysis fast (matches server-side cap)
+
+function onStopToggle(cb) {
+  let checked = document.querySelectorAll('.result-checkbox:checked');
+  // Enforce the cap: undo the checkbox that just pushed us over the limit
+  if (cb && checked.length > MAX_STOPS) {
+    cb.checked = false;
+    showStatus(`最多只能選擇 ${MAX_STOPS} 個目的地，以維持路線分析速度`, 'warn');
+    checked = document.querySelectorAll('.result-checkbox:checked');
+  }
+  const n = checked.length;
   const btn = document.getElementById('optimize-btn');
-  btn.style.display = checked >= 2 ? 'inline-flex' : 'inline-flex';
-  btn.textContent = checked >= 2
-    ? `🗺️ 規劃 ${checked} 站點最佳路線`
-    : '🗺️ 規劃多站點最佳路線';
+  btn.textContent = n >= 2 ? `🗺️ 規劃 ${n} 站點最佳路線` : '🗺️ 規劃多站點最佳路線';
 }
 
 let allSelected = false;
 function toggleSelectAll() {
   allSelected = !allSelected;
-  document.querySelectorAll('.result-checkbox').forEach(cb => { cb.checked = allSelected; });
+  const boxes = Array.from(document.querySelectorAll('.result-checkbox'));
+  boxes.forEach((cb, i) => { cb.checked = allSelected && i < MAX_STOPS; });
   document.getElementById('select-all-btn').textContent = allSelected ? '取消全選' : '全選';
+  if (allSelected && boxes.length > MAX_STOPS) {
+    showStatus(`最多只能選擇 ${MAX_STOPS} 個目的地，已自動勾選前 ${MAX_STOPS} 個`, 'warn');
+  }
   onStopToggle();
 }
 
@@ -379,6 +402,15 @@ async function submitReport() {
     return;
   }
 
+  // Geocoding takes a few seconds — show a spinner so the user knows to wait
+  const btn = document.getElementById('report-submit-btn');
+  const spinner = document.getElementById('report-spinner');
+  btn.disabled = true;
+  btn.textContent = '送出中⋯';
+  spinner.classList.remove('hidden');
+  feedback.textContent = '⏳ 正在定位地點並送出，請稍候⋯⋯';
+  feedback.className = 'report-feedback info';
+
   try {
     const res = await fetch('/report', {
       method: 'POST',
@@ -391,12 +423,79 @@ async function submitReport() {
     if (data.success) {
       document.getElementById('r-location').value = '';
       document.getElementById('r-desc').value = '';
+      loadReports();                              // refresh the message board
       setTimeout(() => { refreshMap(); }, 1500);
     }
   } catch {
     feedback.textContent = '送出失敗，請稍後再試';
     feedback.className = 'report-feedback error';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '送出回報';
+    spinner.classList.add('hidden');
   }
+}
+
+// ===================== MESSAGE BOARD =====================
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+}
+
+function timeAgo(ts) {
+  const diff = Date.now() / 1000 - ts;
+  if (diff < 60) return '剛剛';
+  if (diff < 3600) return `${Math.floor(diff / 60)} 分鐘前`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)} 小時前`;
+  return `${Math.floor(diff / 86400)} 天前`;
+}
+
+async function loadReports() {
+  const list = document.getElementById('board-list');
+  try {
+    const res = await fetch('/reports');
+    const data = await res.json();
+    if (!data.reports || data.reports.length === 0) {
+      list.innerHTML = '<p class="board-empty">目前沒有有效的社群回報，成為第一個回報的人吧！</p>';
+      return;
+    }
+    list.innerHTML = data.reports.map(r => {
+      const isDanger = r.report_type === 'danger';
+      const badge = isDanger
+        ? '<span class="board-badge danger">⚠️ 危險</span>'
+        : '<span class="board-badge recommend">✅ 推薦</span>';
+      return `
+        <div class="board-card ${isDanger ? 'danger' : 'recommend'}">
+          <div class="board-card-top">
+            ${badge}
+            <span class="board-loc">📍 ${escapeHtml(r.location_name)}</span>
+            <span class="board-time">${timeAgo(r.timestamp)}</span>
+          </div>
+          <div class="board-desc">${escapeHtml(r.description)}</div>
+          <div class="board-votes">
+            <button class="vote-btn" onclick="voteReport('${r.id}','up')">👍 ${r.upvotes}</button>
+            <button class="vote-btn" onclick="voteReport('${r.id}','down')">👎 ${r.downvotes}</button>
+          </div>
+        </div>`;
+    }).join('');
+  } catch {
+    list.innerHTML = '<p class="board-empty">留言板載入失敗，請稍後再試。</p>';
+  }
+}
+
+async function voteReport(id, type) {
+  try {
+    const res = await fetch('/vote', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({report_id: id, vote_type: type}),
+    });
+    const data = await res.json();
+    if (data.success) {
+      loadReports();
+      refreshMap();
+    }
+  } catch { /* ignore */ }
 }
 
 // ===================== WEATHER BANNER =====================
@@ -453,6 +552,9 @@ function setLoading(on) {
 document.getElementById('address-input').addEventListener('keydown', e => {
   if (e.key === 'Enter') doSearch();
 });
+
+// Load the community message board on page load
+loadReports();
 </script>
 </body>
 </html>

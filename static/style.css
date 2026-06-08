@@ -385,6 +385,7 @@ body {
 }
 .report-feedback.ok    { color: var(--green-primary); }
 .report-feedback.error { color: var(--red); }
+.report-feedback.info  { color: var(--blue); }
 
 .report-examples {
   margin-top: 14px;
@@ -404,6 +405,67 @@ body {
 .danger-ex:hover { background: #ffe4e6; }
 .recommend-ex { background: #f0fdf4; color: #14532d; border: 1px solid #bbf7d0; }
 .recommend-ex:hover { background: #dcfce7; }
+
+/* ===== MESSAGE BOARD ===== */
+.board-section {
+  max-width: 1100px;
+  margin: 16px auto 24px;
+  padding: 0 16px;
+}
+.board-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.board-header h2 { color: var(--green-dark); font-size: 1.15rem; }
+.board-note { font-size: .82rem; color: var(--text-light); margin: 6px 0 12px; }
+.board-list { display: flex; flex-direction: column; gap: 10px; }
+
+.board-card {
+  background: var(--white);
+  border: 1.5px solid var(--green-light);
+  border-left-width: 5px;
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  box-shadow: var(--shadow-sm);
+}
+.board-card.danger    { border-left-color: var(--red); }
+.board-card.recommend { border-left-color: var(--green-mid); }
+
+.board-card-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 5px;
+}
+.board-badge {
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: .78rem;
+  font-weight: 700;
+}
+.board-badge.danger    { background: #fee2e2; color: var(--red); }
+.board-badge.recommend { background: #d1fae5; color: #065f46; }
+.board-loc  { font-weight: 700; font-size: .92rem; color: var(--text-dark); }
+.board-time { margin-left: auto; font-size: .78rem; color: var(--text-light); }
+.board-desc { font-size: .9rem; color: var(--text-mid); margin-bottom: 8px; white-space: pre-wrap; }
+
+.board-votes { display: flex; gap: 8px; }
+.vote-btn {
+  padding: 4px 12px;
+  border: 1.5px solid var(--green-light);
+  border-radius: 14px;
+  background: var(--white);
+  font-size: .82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.vote-btn:hover { background: var(--green-pale); border-color: var(--green-mid); }
+.board-empty { color: var(--text-light); font-style: italic; padding: 16px 0; }
 
 /* ===== FOOTER ===== */
 .site-footer {

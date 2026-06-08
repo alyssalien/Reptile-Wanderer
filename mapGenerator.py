@@ -219,7 +219,7 @@ def build_map(origin, ranked_candidates, species, weather,
         folium.Marker(
             location=[dr["lat"], dr["lon"]],
             popup=folium.Popup(popup_html, max_width=230),
-            icon=_div_icon("🐕", size=28),
+            icon=_div_icon("⚠️", size=28),
             tooltip=f"⚠️ {dr_loc or '危險'}",
         ).add_to(m)
 
@@ -242,7 +242,7 @@ def build_map(origin, ranked_candidates, species, weather,
         folium.Marker(
             location=[rr["lat"], rr["lon"]],
             popup=folium.Popup(popup_html, max_width=230),
-            icon=_div_icon("🌿", size=28),
+            icon=_div_icon("✅", size=28),
             tooltip=f"✅ {rr_loc or '推薦'}",
         ).add_to(m)
 

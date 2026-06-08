@@ -18,6 +18,8 @@ DEFAULT_MAP = os.path.join(STATIC_DIR, "map.html")  # shared welcome map
 _SESSION_CTX: dict = {}
 _SESSION_TTL = 3600  # drop a session's cached context + map after 1h idle
 
+MAX_STOPS = 5  # cap multi-stop optimisation so route analysis stays fast
+
 _SID_RE = re.compile(r"^[a-f0-9]{32}$")
 
 
@@ -224,6 +226,9 @@ def optimize():
     if len(stops) < 2:
         return jsonify({"error": "請至少選擇 2 個目的地進行多站點規劃"}), 400
 
+    if len(stops) > MAX_STOPS:
+        return jsonify({"error": f"最多只能選擇 {MAX_STOPS} 個目的地，以維持路線分析速度"}), 400
+
     origin = ctx["origin"]
     ordered = optimize_multi_stop(origin["lat"], origin["lon"], stops)
 
@@ -321,6 +326,30 @@ def submit_report():
         )
 
     return jsonify({"success": True, "message": msg})
+
+
+@app.route("/reports")
+def list_reports():
+    """All currently-active community reports, newest first — feeds the message board."""
+    from communityHandler import get_active_reports, purge_old
+
+    purge_old()
+    danger, recommend = get_active_reports()
+
+    def _slim(r):
+        return {
+            "id": r["id"],
+            "report_type": r["report_type"],
+            "location_name": r.get("location_name", ""),
+            "description": r.get("description", ""),
+            "timestamp": r.get("timestamp", 0),
+            "upvotes": r.get("upvotes", 0),
+            "downvotes": r.get("downvotes", 0),
+        }
+
+    items = [_slim(r) for r in danger + recommend]
+    items.sort(key=lambda r: r["timestamp"], reverse=True)
+    return jsonify({"reports": items, "total": len(items)})
 
 
 @app.route("/vote", methods=["POST"])
