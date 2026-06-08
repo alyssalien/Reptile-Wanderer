@@ -62,17 +62,34 @@ class _OverpassResp:
                               "tags": {"name": "中央公園", "leisure": "park"}}]}
 
 
-def test_find_nearby_fails_over_to_next_mirror(monkeypatch):
+@pytest.fixture(autouse=True)
+def _clear_overpass_cache():
+    api._overpass_cache.clear()
+    yield
+
+
+def test_find_nearby_survives_a_failing_mirror(monkeypatch):
+    # Mirrors race in parallel; one failing must not break the search.
+    def post(url, **k):
+        return _OverpassResp(url != api.OVERPASS_URLS[0])   # first mirror 504s, others OK
+
+    monkeypatch.setattr(api.requests, "post", post)
+    out = api.find_nearby(24.8, 121.0, ["park"])
+    assert len(out) == 1 and out[0]["category"] == "park"
+
+
+def test_find_nearby_caches_repeat_search(monkeypatch):
     calls = {"n": 0}
 
     def post(url, **k):
         calls["n"] += 1
-        return _OverpassResp(calls["n"] >= 2)   # first mirror 504s, second succeeds
+        return _OverpassResp(True)
 
     monkeypatch.setattr(api.requests, "post", post)
-    out = api.find_nearby(24.8, 121.0, ["park"])
-    assert calls["n"] == 2
-    assert len(out) == 1 and out[0]["category"] == "park"
+    api.find_nearby(24.8, 121.0, ["park"])
+    first = calls["n"]
+    api.find_nearby(24.8, 121.0, ["park"])   # identical search -> served from cache
+    assert calls["n"] == first               # no extra network calls
 
 
 def test_find_nearby_raises_when_all_mirrors_fail(monkeypatch):

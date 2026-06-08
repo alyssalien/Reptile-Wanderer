@@ -105,6 +105,19 @@ class OverpassUnavailable(Exception):
     """Raised when every Overpass mirror fails — distinct from 'genuinely no results'."""
 
 
+# Short-lived cache of successful Overpass responses, so repeating the same
+# search (or retrying after a hiccup) is instant instead of hitting the network.
+_overpass_cache = {}
+OVERPASS_CACHE_TTL = 600  # 10 minutes
+
+
+def _overpass_query_one(url, query):
+    # (connect, read): drop an unreachable mirror fast, allow a slow query up to 25 s
+    resp = requests.post(url, data={"data": query}, headers=HEADERS, timeout=(5, 25))
+    resp.raise_for_status()
+    return resp.json()
+
+
 def find_nearby(lat, lon, categories, radius=1500):
     conditions = []
     for cat in categories:
@@ -115,25 +128,36 @@ def find_nearby(lat, lon, categories, radius=1500):
     if not conditions:
         return []
 
-    query = f"[out:json][timeout:30];({''.join(conditions)});out center 60;"
+    # Serve a recent identical search from cache
+    cache_key = (round(lat, 3), round(lon, 3), tuple(sorted(categories)), radius)
+    cached = _overpass_cache.get(cache_key)
+    if cached and (time.time() - cached["ts"]) < OVERPASS_CACHE_TTL:
+        data = cached["data"]
+    else:
+        # Lower server-side timeout so a busy mirror gives up sooner
+        query = f"[out:json][timeout:25];({''.join(conditions)});out center 60;"
 
-    # Try each mirror until one answers; only give up (raise) if ALL fail
-    data = None
-    last_error = None
-    for url in OVERPASS_URLS:
+        # Race all mirrors AT ONCE — the first healthy one wins, so we wait for the
+        # fastest server rather than timing each out one-by-one.
+        import concurrent.futures
+        data = None
+        last_error = None
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=len(OVERPASS_URLS))
         try:
-            # (connect, read): give up fast on an unreachable mirror, but allow a
-            # slow-but-working query up to 30 s to return before failing over.
-            resp = requests.post(url, data={"data": query}, headers=HEADERS, timeout=(5, 30))
-            resp.raise_for_status()
-            data = resp.json()
-            break
-        except Exception as e:
-            last_error = e
-            continue
+            futures = [executor.submit(_overpass_query_one, url, query) for url in OVERPASS_URLS]
+            for fut in concurrent.futures.as_completed(futures):
+                try:
+                    data = fut.result()
+                    break  # first success wins; ignore the slower mirrors
+                except Exception as e:
+                    last_error = e
+        finally:
+            executor.shutdown(wait=False)  # don't block on the losing requests
 
-    if data is None:
-        raise OverpassUnavailable(f"all Overpass mirrors failed: {last_error}")
+        if data is None:
+            raise OverpassUnavailable(f"all Overpass mirrors failed: {last_error}")
+
+        _overpass_cache[cache_key] = {"data": data, "ts": time.time()}
 
     candidates = []
     seen = set()
