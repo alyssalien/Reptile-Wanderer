@@ -92,10 +92,40 @@ def _species_score(candidate, species, is_hot, uv_index, danger_reports, recomme
     return score
 
 
+# Hard per-species environment rules (the location set each species may use AT ALL).
+# These are categorical constraints that EXCLUDE unsuitable spots — the soft scoring
+# above then only ranks the survivors. Categories: park / grass / forest / campus / convenience.
+SPECIES_ALLOWED_CATEGORIES = {
+    # Tortoise — flat terrain only: open grass & flat parks. No uneven forest, no busy shops.
+    "tortoise": {"grass", "park"},
+    # Beardie — quiet, low-traffic open areas. Everything except busy convenience stores.
+    "beardie": {"park", "grass", "forest", "campus"},
+    # Gecko has no category whitelist; it is constrained by shade instead (see below).
+}
+
+
+def _species_allowed(candidate, species):
+    """Return True if this destination satisfies the species' hard environment rule."""
+    cat = candidate.get("category", "park")
+
+    if species == "gecko":
+        # Nocturnal: only shaded / sheltered spots (shaded parks, tree-lined paths).
+        # Avoids heat and strong light by construction.
+        return bool(candidate.get("is_shaded", False))
+
+    allowed = SPECIES_ALLOWED_CATEGORIES.get(species)
+    if allowed is not None:
+        return cat in allowed
+    return True
+
+
 def filter_and_rank(candidates, species, max_walk_min, is_hot, uv_index, humidity,
                     danger_reports, recommend_reports):
-    # Filter: only keep destinations with valid OSRM walk times within threshold
+    # Filter 1: valid OSRM walk time within the user's threshold
     valid = [c for c in candidates if c.get("walk_min") is not None and c["walk_min"] <= max_walk_min]
+
+    # Filter 2: hard per-species environment rules (only suitable habitats survive)
+    valid = [c for c in valid if _species_allowed(c, species)]
 
     for c in valid:
         base = _species_score(c, species, is_hot, uv_index, danger_reports, recommend_reports)

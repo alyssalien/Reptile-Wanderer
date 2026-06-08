@@ -71,3 +71,24 @@ def test_optimize_empty():
 
 def test_haversine_zero_distance():
     assert rf._haversine_m(24.8, 121.0, 24.8, 121.0) == 0
+
+
+# --- Hard per-species environment rules ---------------------------------------
+def test_gecko_only_shaded_locations():
+    cands = [_c(name="sun", is_shaded=False), _c(name="shade", is_shaded=True)]
+    ranked = rf.filter_and_rank(cands, "gecko", 15, False, 0, 60, [], [])
+    names = [c["name"] for c in ranked]
+    assert names == ["shade"]   # unshaded excluded entirely
+
+
+def test_tortoise_flat_terrain_only():
+    cands = [_c(name="grass", category="grass"), _c(name="park", category="park"),
+             _c(name="forest", category="forest"), _c(name="shop", category="convenience")]
+    names = {c["name"] for c in rf.filter_and_rank(cands, "tortoise", 15, False, 0, 60, [], [])}
+    assert names == {"grass", "park"}   # forest (uneven) & shop (busy) excluded
+
+
+def test_beardie_excludes_busy_convenience():
+    cands = [_c(name="park", category="park"), _c(name="shop", category="convenience")]
+    names = {c["name"] for c in rf.filter_and_rank(cands, "beardie", 15, False, 0, 60, [], [])}
+    assert names == {"park"}   # quiet areas only; busy shop excluded
