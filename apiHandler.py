@@ -11,7 +11,6 @@ OVERPASS_URLS = [
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
     "https://overpass.private.coffee/api/interpreter",
-    "https://overpass.osm.ch/api/interpreter",
     "https://overpass.openstreetmap.fr/api/interpreter",
 ]
 OSRM_BASE = "http://router.project-osrm.org"
@@ -147,37 +146,51 @@ def _overpass_query_one(url, query):
     # (connect, read): drop an unreachable mirror fast, allow a slow query up to 25 s
     resp = requests.post(url, data={"data": query}, headers=HEADERS, timeout=(5, 25))
     resp.raise_for_status()
-    return resp.json()
+    data = resp.json()
+    # Overpass returns HTTP 200 with a "remark" + empty elements when the query
+    # times out / runs out of memory server-side. Treat that as a failure so we
+    # retry another mirror instead of mistaking it for "no places nearby".
+    if not data.get("elements") and data.get("remark"):
+        raise RuntimeError(f"Overpass server-side error: {data['remark']}")
+    return data
 
 
 def _fetch_overpass(query):
-    """Race every mirror in parallel; return the first success or raise."""
+    """Race every mirror in parallel, preferring the first NON-EMPTY answer.
+
+    A broken/fast mirror can return HTTP 200 with zero elements; if we just took
+    the first response it would wrongly win over a slower mirror that actually has
+    the data. So a non-empty result returns immediately, while an empty success is
+    only used as a last resort once every mirror has reported."""
     import concurrent.futures
-    data = None
+    empty_fallback = None
     last_error = None
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=len(OVERPASS_URLS))
     try:
         futures = [executor.submit(_overpass_query_one, url, query) for url in OVERPASS_URLS]
         for fut in concurrent.futures.as_completed(futures):
             try:
-                data = fut.result()
-                break  # first success wins; ignore the slower mirrors
+                d = fut.result()
+                if d.get("elements"):
+                    return d                 # real data — use it right away
+                empty_fallback = d           # genuine-empty success; keep waiting
             except Exception as e:
                 last_error = e
     finally:
-        executor.shutdown(wait=False)  # don't block on the losing requests
+        executor.shutdown(wait=False)        # don't block on the losing requests
 
-    if data is None:
-        raise OverpassUnavailable(f"all Overpass mirrors failed: {last_error}")
-    return data
+    if empty_fallback is not None:
+        return empty_fallback                # every responder agreed: nothing nearby
+    raise OverpassUnavailable(f"all Overpass mirrors failed: {last_error}")
 
 
 def find_nearby(lat, lon, categories, radius=1500):
+    # `nwr` = node+way+relation in one line → ~half the sub-queries vs node;way;,
+    # so the query is lighter and far less likely to time out server-side.
     conditions = []
     for cat in categories:
         for key, val in CATEGORY_TAGS.get(cat, []):
-            conditions.append(f'node["{key}"="{val}"](around:{radius},{lat},{lon});')
-            conditions.append(f'way["{key}"="{val}"](around:{radius},{lat},{lon});')
+            conditions.append(f'nwr["{key}"="{val}"](around:{radius},{lat},{lon});')
 
     if not conditions:
         return []
@@ -186,16 +199,22 @@ def find_nearby(lat, lon, categories, radius=1500):
     cache_key = f"{round(lat, 3)},{round(lon, 3)}|{','.join(sorted(categories))}|{radius}"
     entry = cache.get(cache_key)
 
-    if entry and (time.time() - entry["ts"]) < OVERPASS_CACHE_TTL:
-        data = entry["data"]                      # fresh cache hit
+    def _has_results(d):
+        return bool(d and d.get("elements"))
+
+    # Fresh, non-empty cache hit
+    if entry and (time.time() - entry["ts"]) < OVERPASS_CACHE_TTL and _has_results(entry["data"]):
+        data = entry["data"]
     else:
         query = f"[out:json][timeout:25];({''.join(conditions)});out center 60;"
         try:
             data = _fetch_overpass(query)
-            cache[cache_key] = {"data": data, "ts": time.time()}
-            _save_overpass_cache()
+            # Only cache real results — never poison the cache with an empty answer
+            if _has_results(data):
+                cache[cache_key] = {"data": data, "ts": time.time()}
+                _save_overpass_cache()
         except OverpassUnavailable:
-            if entry:
+            if _has_results(entry and entry["data"]):
                 data = entry["data"]              # all mirrors down → serve stale copy
             else:
                 raise                             # never fetched this area → give up

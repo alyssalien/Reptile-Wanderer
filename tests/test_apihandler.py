@@ -122,3 +122,41 @@ def test_find_nearby_serves_stale_cache_when_mirrors_down(monkeypatch):
 
 def test_find_nearby_no_categories_returns_empty():
     assert api.find_nearby(24.8, 121.0, []) == []
+
+
+class _RemarkResp:
+    """Overpass HTTP 200 but server-side timeout: empty elements + a remark."""
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return {"elements": [], "remark": "runtime error: Query timed out"}
+
+
+def test_remark_timeout_treated_as_failure(monkeypatch):
+    monkeypatch.setattr(api.requests, "post", lambda url, **k: _RemarkResp())
+    with pytest.raises(api.OverpassUnavailable):
+        api.find_nearby(24.8, 121.0, ["park"])
+
+
+class _EmptyResp:
+    """Genuine empty result (200, no remark) — valid 'nothing nearby'."""
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return {"elements": []}
+
+
+def test_genuine_empty_is_not_cached(monkeypatch):
+    calls = {"n": 0}
+
+    def post(url, **k):
+        calls["n"] += 1
+        return _EmptyResp()
+
+    monkeypatch.setattr(api.requests, "post", post)
+    assert api.find_nearby(24.8, 121.0, ["park"]) == []
+    after_first = calls["n"]
+    assert api.find_nearby(24.8, 121.0, ["park"]) == []   # re-queries, not cached
+    assert calls["n"] > after_first
