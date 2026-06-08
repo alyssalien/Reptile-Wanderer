@@ -216,7 +216,7 @@ async function doSearch() {
   const maxWalk = parseInt(document.getElementById('max-walk').value);
 
   setLoading(true);
-  showStatus('搜尋中，請稍候⋯⋯（OSRM 路徑計算需要數秒）', 'info');
+  showStatus('搜尋中，請稍候⋯⋯（向 OpenStreetMap 查地點與路徑，約需 5～20 秒，請勿重複點擊）', 'info');
 
   try {
     const res = await fetch('/search', {
@@ -232,6 +232,8 @@ async function doSearch() {
     const data = await res.json();
 
     if (!res.ok) {
+      // Even when the location search fails, show the weather if we got it
+      if (data.weather) updateWeatherBanner(data.weather);
       showStatus(data.error || '搜尋失敗', 'error');
       return;
     }
