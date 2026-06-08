@@ -125,15 +125,20 @@ def search():
     #    so we can still show the temperature even if finding locations fails below.
     weather = get_weather(origin["lat"], origin["lon"])
 
-    # 3. Find nearby via Overpass (fails over across mirrors)
+    # 3. Find nearby via Overpass (fails over across mirrors).
+    #    Auto-widen the radius if the immediate area (1500 m) is sparse.
     from apiHandler import OverpassUnavailable
+    widened = False
     try:
         candidates = find_nearby(origin["lat"], origin["lon"], categories)
+        if not candidates:
+            candidates = find_nearby(origin["lat"], origin["lon"], categories, radius=3000)
+            widened = bool(candidates)
     except OverpassUnavailable:
         return jsonify({"error": "地點服務暫時忙碌（OpenStreetMap 伺服器壅塞），請稍候幾秒再試一次。",
                         "weather": weather}), 503
     if not candidates:
-        return jsonify({"error": "附近找不到符合條件的地點，請更換類別或搜尋不同地址",
+        return jsonify({"error": "附近 3 公里內找不到所選類別的地點，請多勾幾個類別、加長步行時間，或換個地址再試。",
                         "weather": weather}), 404
 
     # 4. Get real walking times in ONE OSRM /table call (was N sequential /route calls).

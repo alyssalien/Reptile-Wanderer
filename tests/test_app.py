@@ -61,6 +61,22 @@ def test_search_requires_address(client):
     assert r.status_code == 400
 
 
+def test_search_widens_radius_when_sparse(client, monkeypatch):
+    import apiHandler
+
+    def fn(lat, lon, cats, radius=1500):
+        if radius == 1500:
+            return []   # nothing in the immediate area
+        return [{"name": "遠公園", "lat": 24.81, "lon": 121.01,
+                 "category": "park", "is_shaded": True, "rating": 0}]
+
+    monkeypatch.setattr(apiHandler, "find_nearby", fn)
+    r = client.post("/search", json={"address": "偏遠地址", "species": "gecko",
+                                     "max_walk_min": 15, "categories": ["park"]})
+    assert r.status_code == 200
+    assert r.get_json()["total_found"] == 1   # found after widening to 3 km
+
+
 def test_search_reports_overpass_busy(client, monkeypatch):
     import apiHandler
     def boom(*a, **k):

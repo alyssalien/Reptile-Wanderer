@@ -26,11 +26,13 @@ _geocode_cache = {}
 
 # Maps UI category names to OSM tag pairs
 CATEGORY_TAGS = {
-    "park":        [("leisure", "park"), ("leisure", "garden")],
-    "grass":       [("landuse", "grass"), ("leisure", "pitch"), ("landuse", "meadow")],
-    "convenience": [("shop", "convenience")],
+    "park":        [("leisure", "park"), ("leisure", "garden"),
+                    ("leisure", "recreation_ground"), ("leisure", "common")],
+    "grass":       [("landuse", "grass"), ("leisure", "pitch"), ("landuse", "meadow"),
+                    ("landuse", "recreation_ground")],
+    "convenience": [("shop", "convenience"), ("shop", "supermarket")],
     "forest":      [("landuse", "forest"), ("natural", "wood"), ("leisure", "nature_reserve")],
-    "campus":      [("amenity", "university"), ("amenity", "college")],
+    "campus":      [("amenity", "university"), ("amenity", "college"), ("amenity", "school")],
 }
 
 # OSM tags that imply meaningful shade coverage (for gecko heat-avoidance logic)
