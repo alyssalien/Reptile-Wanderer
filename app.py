@@ -359,6 +359,15 @@ def list_reports():
     return jsonify({"reports": items, "total": len(items)})
 
 
+@app.route("/reports/clear", methods=["POST"])
+def clear_reports():
+    """Reset the community board — remove all reports."""
+    from communityHandler import clear_all
+
+    ok = clear_all()
+    return jsonify({"success": ok})
+
+
 @app.route("/vote", methods=["POST"])
 def vote():
     from communityHandler import vote_report

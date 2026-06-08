@@ -197,6 +197,12 @@ body {
   box-shadow: var(--shadow-sm);
 }
 .btn-accent:hover:not(:disabled) { background: #1e8449; }
+.btn-danger {
+  background: var(--white);
+  color: var(--red);
+  border: 2px solid #fca5a5;
+}
+.btn-danger:hover:not(:disabled) { background: #fee2e2; }
 
 /* ===== MAP SECTION ===== */
 .map-section {
@@ -420,6 +426,7 @@ body {
   gap: 10px;
 }
 .board-header h2 { color: var(--green-dark); font-size: 1.15rem; }
+.board-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .board-note { font-size: .82rem; color: var(--text-light); margin: 6px 0 12px; }
 .board-list { display: flex; flex-direction: column; gap: 10px; }
 

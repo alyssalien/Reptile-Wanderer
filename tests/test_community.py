@@ -86,6 +86,13 @@ def test_upvotes_extend_ttl(ch):
     assert len(danger) == 1   # extension keeps it alive
 
 
+def test_clear_all_empties_board(ch):
+    _add(ch, location_name="A")
+    _add(ch, location_name="B", report_type="recommend")
+    assert ch.clear_all() is True
+    assert ch.get_active_reports() == ([], [])
+
+
 def test_legacy_json_migration(tmp_path, monkeypatch):
     import communityHandler as mod
     legacy = tmp_path / "reports.json"

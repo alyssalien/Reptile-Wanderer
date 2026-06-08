@@ -115,3 +115,14 @@ def test_reports_board_lists_active(client):
     assert body["total"] == 2
     types = {x["report_type"] for x in body["reports"]}
     assert types == {"danger", "recommend"}
+
+
+def test_reports_clear_resets_board(client):
+    import communityHandler as ch
+    ch.add_report({"location_name": "X", "report_type": "danger",
+                   "description": "d", "lat": 24.8, "lon": 121.0})
+    assert client.get("/reports").get_json()["total"] == 1
+
+    r = client.post("/reports/clear")
+    assert r.status_code == 200 and r.get_json()["success"] is True
+    assert client.get("/reports").get_json()["total"] == 0

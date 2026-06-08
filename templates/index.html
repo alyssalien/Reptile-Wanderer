@@ -169,7 +169,10 @@
 <section class="board-section">
   <div class="board-header">
     <h2>📋 社群留言板</h2>
-    <button class="btn btn-secondary" onclick="loadReports()">🔄 重新整理</button>
+    <div class="board-actions">
+      <button class="btn btn-secondary" onclick="loadReports()">🔄 重新整理</button>
+      <button class="btn btn-danger" onclick="resetReports()">🗑️ 清空留言板</button>
+    </div>
   </div>
   <p class="board-note">所有有效的危險 / 推薦回報都會列在這裡（過期會自動移除）。可在此對回報投票。</p>
   <div id="board-list" class="board-list">
@@ -483,6 +486,23 @@ async function loadReports() {
     }).join('');
   } catch {
     list.innerHTML = '<p class="board-empty">留言板載入失敗，請稍後再試。</p>';
+  }
+}
+
+async function resetReports() {
+  if (!confirm('確定要清空所有社群回報嗎？此動作無法復原。')) return;
+  try {
+    const res = await fetch('/reports/clear', {method: 'POST'});
+    const data = await res.json();
+    if (data.success) {
+      loadReports();
+      refreshMap();
+      showStatus('社群留言板已清空', 'ok');
+    } else {
+      showStatus('清空失敗，請稍後再試', 'error');
+    }
+  } catch {
+    showStatus('網路錯誤，清空失敗', 'error');
   }
 }
 

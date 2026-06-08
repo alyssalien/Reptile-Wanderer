@@ -156,6 +156,19 @@ def vote_report(report_id, vote_type):
         conn.close()
 
 
+def clear_all():
+    """Delete every report — resets the community board to empty."""
+    conn = _connect()
+    try:
+        conn.execute("DELETE FROM reports")
+        conn.commit()
+        return True
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+
 def purge_old():
     conn = _connect()
     try:
