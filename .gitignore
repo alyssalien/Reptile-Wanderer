@@ -3,6 +3,7 @@ __pycache__/
 *.pyo
 .env
 .claude/
+.idea/
 static/map.html
 static/maps/
 data/reports.db
