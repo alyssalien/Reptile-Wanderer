@@ -2,7 +2,13 @@ import requests
 import time
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+# Multiple Overpass mirrors — the public ones overload often (HTTP 504). We try
+# them in order and fail over, so one busy server no longer breaks every search.
+OVERPASS_URLS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+]
 OSRM_BASE = "http://router.project-osrm.org"
 OSRM_ROUTE_URL = f"{OSRM_BASE}/route/v1/foot"
 OSRM_TABLE_URL = f"{OSRM_BASE}/table/v1/foot"
@@ -95,6 +101,10 @@ def geocode(address):
         return None
 
 
+class OverpassUnavailable(Exception):
+    """Raised when every Overpass mirror fails — distinct from 'genuinely no results'."""
+
+
 def find_nearby(lat, lon, categories, radius=1500):
     conditions = []
     for cat in categories:
@@ -107,12 +117,23 @@ def find_nearby(lat, lon, categories, radius=1500):
 
     query = f"[out:json][timeout:30];({''.join(conditions)});out center 60;"
 
-    try:
-        resp = requests.post(OVERPASS_URL, data={"data": query}, headers=HEADERS, timeout=35)
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception:
-        return []
+    # Try each mirror until one answers; only give up (raise) if ALL fail
+    data = None
+    last_error = None
+    for url in OVERPASS_URLS:
+        try:
+            # (connect, read): give up fast on an unreachable mirror, but allow a
+            # slow-but-working query up to 30 s to return before failing over.
+            resp = requests.post(url, data={"data": query}, headers=HEADERS, timeout=(5, 30))
+            resp.raise_for_status()
+            data = resp.json()
+            break
+        except Exception as e:
+            last_error = e
+            continue
+
+    if data is None:
+        raise OverpassUnavailable(f"all Overpass mirrors failed: {last_error}")
 
     candidates = []
     seen = set()

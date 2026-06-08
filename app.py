@@ -121,8 +121,12 @@ def search():
     if not origin:
         return jsonify({"error": f"找不到「{address}」，請嘗試更具體的地址或加上城市名稱"}), 400
 
-    # 2. Find nearby via Overpass
-    candidates = find_nearby(origin["lat"], origin["lon"], categories)
+    # 2. Find nearby via Overpass (fails over across mirrors)
+    from apiHandler import OverpassUnavailable
+    try:
+        candidates = find_nearby(origin["lat"], origin["lon"], categories)
+    except OverpassUnavailable:
+        return jsonify({"error": "地點服務暫時忙碌（OpenStreetMap 伺服器壅塞），請稍候幾秒再試一次。"}), 503
     if not candidates:
         return jsonify({"error": "附近找不到符合條件的地點，請更換類別或搜尋不同地址"}), 404
 

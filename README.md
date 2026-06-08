@@ -215,7 +215,7 @@ pytest
 ## 已知限制與改進建議
 
 - **Session context 存於記憶體**：已支援多人各自的搜尋狀態(per-session),但 context 存在 worker 記憶體中,所以 Docker 仍只開 **1 個 gunicorn worker**;要水平擴展需改用 Redis 等共享儲存。
-- **公開 demo API**：Nominatim / Overpass / OSRM 皆為公開服務，有流量限制、無 SLA，不適合正式上線。
+- **公開 demo API**：Nominatim / Overpass / OSRM 皆為公開服務，有流量限制、無 SLA，不適合正式上線。Overpass 已內建多鏡像備援(主站常 504)，但若所有鏡像同時忙碌仍會顯示「服務忙碌」訊息，稍候再試即可。
 - **OSM 評分欄位稀疏**：多數地點無 `stars`/`rating`，排序主要由物種分數決定（評分僅作加權微調）。
 - **高溫路段為靜態資料**：`hotRoads.geojson` 僅涵蓋新竹清大周邊，換城市時不會有對應的高溫路段標示。
 - **陸龜避階梯僅止於地點層級**：受限於公開 OSRM demo,無法在實際路徑上排除 `highway=steps`(詳見上方「物種硬性環境規則」)。

@@ -61,6 +61,17 @@ def test_search_requires_address(client):
     assert r.status_code == 400
 
 
+def test_search_reports_overpass_busy(client, monkeypatch):
+    import apiHandler
+    def boom(*a, **k):
+        raise apiHandler.OverpassUnavailable("all mirrors down")
+    monkeypatch.setattr(apiHandler, "find_nearby", boom)
+    r = client.post("/search", json={"address": "清華大學", "species": "gecko",
+                                     "max_walk_min": 15, "categories": ["park"]})
+    assert r.status_code == 503
+    assert "忙碌" in r.get_json()["error"]
+
+
 def test_optimize_requires_prior_search(client):
     r = client.post("/optimize", json={"stops": [{"lat": 1, "lon": 1}, {"lat": 2, "lon": 2}]})
     assert r.status_code == 400
