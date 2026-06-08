@@ -39,6 +39,11 @@ GENERAL_RECOMMEND_BONUS = 1.5
 UV_HIGH_GECKO = 6    # warn / penalise unshaded spots for nocturnal gecko
 UV_GOOD_BEARDIE = 3  # beardie and tortoise benefit from moderate UV exposure
 
+# OSM rating contributes to the score instead of overriding it. Most OSM places
+# have no rating (0); a 5-star place gets +2.0 — comparable to a category bonus,
+# so it nudges ranking without burying a better species-fit destination.
+RATING_WEIGHT = 0.4
+
 
 def _haversine_m(lat1, lon1, lat2, lon2):
     R = 6_371_000
@@ -93,10 +98,12 @@ def filter_and_rank(candidates, species, max_walk_min, is_hot, uv_index, humidit
     valid = [c for c in candidates if c.get("walk_min") is not None and c["walk_min"] <= max_walk_min]
 
     for c in valid:
-        c["species_score"] = _species_score(c, species, is_hot, uv_index, danger_reports, recommend_reports)
+        base = _species_score(c, species, is_hot, uv_index, danger_reports, recommend_reports)
+        # Fold the (usually sparse) OSM rating in as a bonus rather than the top key
+        c["species_score"] = base + c.get("rating", 0) * RATING_WEIGHT
 
-    # Sort by: 1) OSM rating desc  2) species_score desc  3) walk_min asc
-    valid.sort(key=lambda c: (-c.get("rating", 0), -c["species_score"], c["walk_min"]))
+    # Sort by: 1) species_score desc (rating already baked in)  2) walk_min asc
+    valid.sort(key=lambda c: (-c["species_score"], c["walk_min"]))
     return valid
 
 

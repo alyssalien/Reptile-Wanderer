@@ -1,11 +1,68 @@
 import os
+import re
 import time
-from flask import Flask, render_template, request, jsonify, send_file
+import uuid
+
+from flask import Flask, render_template, request, jsonify, send_file, g
 
 app = Flask(__name__)
 
-# Stores last search result so /optimize can rebuild the map without re-searching
-_last_ctx: dict = {}
+_BASE = os.path.dirname(os.path.abspath(__file__))
+STATIC_DIR = os.path.join(_BASE, "static")
+MAPS_DIR = os.path.join(STATIC_DIR, "maps")        # per-session map files live here
+DEFAULT_MAP = os.path.join(STATIC_DIR, "map.html")  # shared welcome map
+
+# Per-session search context (replaces the old single global). Keyed by session id
+# so concurrent users don't overwrite each other's last search / map.
+# In-memory: matches the single-gunicorn-worker deployment; survives within a worker.
+_SESSION_CTX: dict = {}
+_SESSION_TTL = 3600  # drop a session's cached context + map after 1h idle
+
+_SID_RE = re.compile(r"^[a-f0-9]{32}$")
+
+
+# ===================== SESSION =====================
+@app.before_request
+def _ensure_session():
+    sid = request.cookies.get("rw_sid", "")
+    if not _SID_RE.match(sid):          # missing or malformed (guards path traversal)
+        sid = uuid.uuid4().hex
+        g._new_sid = sid
+    g.sid = sid
+
+
+@app.after_request
+def _set_session_cookie(resp):
+    new = getattr(g, "_new_sid", None)
+    if new:
+        resp.set_cookie("rw_sid", new, max_age=86400, samesite="Lax", httponly=True)
+    return resp
+
+
+def _session_map_path(sid):
+    return os.path.join(MAPS_DIR, f"{sid}.html")
+
+
+def _save_ctx(sid, ctx):
+    _SESSION_CTX[sid] = {"data": ctx, "ts": time.time()}
+    _prune_sessions()
+
+
+def _get_ctx(sid):
+    entry = _SESSION_CTX.get(sid)
+    return entry["data"] if entry else None
+
+
+def _prune_sessions():
+    """Drop idle sessions and delete their orphaned map files."""
+    now = time.time()
+    expired = [s for s, e in _SESSION_CTX.items() if now - e["ts"] > _SESSION_TTL]
+    for s in expired:
+        _SESSION_CTX.pop(s, None)
+        try:
+            os.remove(_session_map_path(s))
+        except OSError:
+            pass
 
 
 def _extract_city(display_name: str) -> str:
@@ -18,19 +75,18 @@ def _extract_city(display_name: str) -> str:
 
 
 def _generate_default_map():
-    map_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "map.html")
-    if not os.path.exists(map_path):
+    if not os.path.exists(DEFAULT_MAP):
         import folium
-        os.makedirs(os.path.dirname(map_path), exist_ok=True)
+        os.makedirs(STATIC_DIR, exist_ok=True)
         m = folium.Map(location=[24.7953, 120.9962], zoom_start=15, tiles="OpenStreetMap")
         welcome = (
-            '<div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);"'
-            'style="background:rgba(255,255,255,.85);padding:20px;border-radius:12px;'
+            '<div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);'
+            'background:rgba(255,255,255,.85);padding:20px;border-radius:12px;'
             'text-align:center;font-size:16px;z-index:9999;">'
             "🦎 Reptile Wanderer<br><small>請在上方輸入地址後按下搜尋</small></div>"
         )
         m.get_root().html.add_child(folium.Element(welcome))
-        m.save(map_path)
+        m.save(DEFAULT_MAP)
 
 
 @app.route("/")
@@ -41,7 +97,7 @@ def index():
 
 @app.route("/search", methods=["POST"])
 def search():
-    from apiHandler import geocode, find_nearby, get_route
+    from apiHandler import geocode, find_nearby, get_route, get_route_table
     from routeFilter import filter_and_rank
     from mapGenerator import build_map
     from weatherHandler import get_weather
@@ -68,21 +124,22 @@ def search():
     if not candidates:
         return jsonify({"error": "附近找不到符合條件的地點，請更換類別或搜尋不同地址"}), 404
 
-    # 3. Get real walking routes (OSRM) — never use straight-line distance
-    for c in candidates:
-        route = get_route(origin["lat"], origin["lon"], c["lat"], c["lon"])
-        if route:
-            c["walk_min"] = route["duration"] / 60
-            c["distance_m"] = route["distance"]
-            c["geometry"] = route["geometry"]
+    # 3. Get real walking times in ONE OSRM /table call (was N sequential /route calls).
+    #    /table gives time+distance but no geometry — never straight-line distance.
+    table = get_route_table(origin["lat"], origin["lon"], candidates)
+    for c, t in zip(candidates, table):
+        if t:
+            c["walk_min"] = t["duration"] / 60
+            c["distance_m"] = t["distance"] if t["distance"] is not None else 0
+            c["geometry"] = None
         else:
             c["walk_min"] = None
             c["geometry"] = None
 
     candidates = [c for c in candidates if c["walk_min"] is not None]
 
-    # 4. Weather
-    weather = get_weather()
+    # 4. Weather (at the search origin, not a fixed city)
+    weather = get_weather(origin["lat"], origin["lon"])
 
     # 5. Community reports
     danger_reports, recommend_reports = get_active_reports()
@@ -94,12 +151,20 @@ def search():
         danger_reports, recommend_reports,
     )
 
-    # 7. Build Folium map
-    top_geometry = ranked[0]["geometry"] if ranked else None
-    build_map(origin, ranked, species, weather, danger_reports, recommend_reports, top_geometry)
+    # 7. Fetch route geometry only for the #1 destination (table has no shapes)
+    top_geometry = None
+    if ranked:
+        route = get_route(origin["lat"], origin["lon"], ranked[0]["lat"], ranked[0]["lon"])
+        if route:
+            ranked[0]["geometry"] = route["geometry"]
+            top_geometry = route["geometry"]
 
-    # Cache context for multi-stop /optimize
-    _last_ctx.update({
+    # 8. Build this session's Folium map
+    build_map(origin, ranked, species, weather, danger_reports, recommend_reports,
+              top_geometry, map_path=_session_map_path(g.sid))
+
+    # Cache context for this session (multi-stop /optimize and /report rebuild)
+    _save_ctx(g.sid, {
         "origin": origin,
         "ranked": ranked,
         "species": species,
@@ -133,9 +198,13 @@ def search():
 
 @app.route("/map")
 def serve_map():
-    map_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "map.html")
-    if os.path.exists(map_path):
-        return send_file(map_path, mimetype="text/html")
+    # Serve this session's map if it has searched; otherwise the shared welcome map
+    session_map = _session_map_path(g.sid)
+    if os.path.exists(session_map):
+        return send_file(session_map, mimetype="text/html")
+    _generate_default_map()
+    if os.path.exists(DEFAULT_MAP):
+        return send_file(DEFAULT_MAP, mimetype="text/html")
     return "<p style='font-family:sans-serif;text-align:center;margin-top:40px;'>請先搜尋地點以載入地圖。</p>", 404
 
 
@@ -145,7 +214,8 @@ def optimize():
     from apiHandler import get_route
     from mapGenerator import build_map
 
-    if not _last_ctx:
+    ctx = _get_ctx(g.sid)
+    if not ctx:
         return jsonify({"error": "請先搜尋地點"}), 400
 
     data = request.get_json() or {}
@@ -154,7 +224,7 @@ def optimize():
     if len(stops) < 2:
         return jsonify({"error": "請至少選擇 2 個目的地進行多站點規劃"}), 400
 
-    origin = _last_ctx["origin"]
+    origin = ctx["origin"]
     ordered = optimize_multi_stop(origin["lat"], origin["lon"], stops)
 
     multi_routes = []
@@ -172,14 +242,15 @@ def optimize():
 
     build_map(
         origin=origin,
-        ranked_candidates=_last_ctx.get("ranked", []),
-        species=_last_ctx.get("species", "gecko"),
-        weather=_last_ctx.get("weather", {}),
-        danger_reports=_last_ctx.get("danger_reports", []),
-        recommend_reports=_last_ctx.get("recommend_reports", []),
+        ranked_candidates=ctx.get("ranked", []),
+        species=ctx.get("species", "gecko"),
+        weather=ctx.get("weather", {}),
+        danger_reports=ctx.get("danger_reports", []),
+        recommend_reports=ctx.get("recommend_reports", []),
         top_geometry=None,
         multi_stop_routes=multi_routes,
         multi_stop_ordered=ordered,
+        map_path=_session_map_path(g.sid),
     )
 
     return jsonify({
@@ -197,19 +268,20 @@ def submit_report():
     from apiHandler import geocode_near
     from mapGenerator import build_map
 
+    ctx = _get_ctx(g.sid)
     data = dict(request.get_json() or {})
 
     # Geocode location name if no coordinates provided
     if "lat" not in data or "lon" not in data:
-        bias_lat = _last_ctx["origin"]["lat"] if _last_ctx else 24.7953
-        bias_lon = _last_ctx["origin"]["lon"] if _last_ctx else 120.9962
+        bias_lat = ctx["origin"]["lat"] if ctx else 24.7953
+        bias_lon = ctx["origin"]["lon"] if ctx else 120.9962
 
         location_name = data.get("location_name", "").strip()
         loc = geocode_near(location_name, bias_lat, bias_lon)
 
         # If not found, retry with city context extracted from last search display_name
-        if not loc and _last_ctx:
-            city_hint = _extract_city(_last_ctx["origin"].get("display_name", ""))
+        if not loc and ctx:
+            city_hint = _extract_city(ctx["origin"].get("display_name", ""))
             if city_hint and city_hint not in location_name:
                 loc = geocode_near(f"{location_name} {city_hint}", bias_lat, bias_lon)
 
@@ -233,18 +305,19 @@ def submit_report():
     else:
         msg = "✅ 回報成功！感謝您的貢獻，地圖即將更新。"
 
-    # Rebuild map so new marker appears immediately
-    if _last_ctx:
+    # Rebuild this session's map so the new marker appears immediately
+    if ctx:
         danger_reports, recommend_reports = get_active_reports()
-        ranked = _last_ctx.get("ranked", [])
+        ranked = ctx.get("ranked", [])
         build_map(
-            origin=_last_ctx["origin"],
+            origin=ctx["origin"],
             ranked_candidates=ranked,
-            species=_last_ctx.get("species", "gecko"),
-            weather=_last_ctx.get("weather", {}),
+            species=ctx.get("species", "gecko"),
+            weather=ctx.get("weather", {}),
             danger_reports=danger_reports,
             recommend_reports=recommend_reports,
             top_geometry=ranked[0]["geometry"] if ranked else None,
+            map_path=_session_map_path(g.sid),
         )
 
     return jsonify({"success": True, "message": msg})
@@ -260,7 +333,12 @@ def vote():
 
 
 if __name__ == "__main__":
-    os.makedirs("static", exist_ok=True)
-    os.makedirs("data", exist_ok=True)
+    os.makedirs(MAPS_DIR, exist_ok=True)
+    os.makedirs(os.path.join(_BASE, "data"), exist_ok=True)
     _generate_default_map()
-    app.run(debug=True, port=5001)
+
+    # Config via environment so the same image runs locally and in Docker
+    host = os.environ.get("HOST", "127.0.0.1")
+    port = int(os.environ.get("PORT", "5001"))
+    debug = os.environ.get("FLASK_DEBUG", "0") == "1"
+    app.run(host=host, port=port, debug=debug)

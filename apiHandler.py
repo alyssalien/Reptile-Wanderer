@@ -3,7 +3,9 @@ import time
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
-OSRM_URL = "http://router.project-osrm.org/route/v1/foot"
+OSRM_BASE = "http://router.project-osrm.org"
+OSRM_ROUTE_URL = f"{OSRM_BASE}/route/v1/foot"
+OSRM_TABLE_URL = f"{OSRM_BASE}/table/v1/foot"
 HEADERS = {
     "User-Agent": "ReptileWanderer/1.0 (student project; contact: student@nthu.edu.tw)",
     "Accept": "application/json, */*",
@@ -170,8 +172,50 @@ def find_nearby(lat, lon, categories, radius=1500):
     return candidates
 
 
+def get_route_table(origin_lat, origin_lon, destinations):
+    """One OSRM /table call for walking time+distance from origin to every destination.
+
+    Replaces N sequential get_route() calls. Returns a list aligned with
+    `destinations`; each item is {"duration": sec, "distance": m} or None if
+    that destination is unreachable. NOTE: /table returns times only — no route
+    geometry — so the caller fetches geometry separately for the winning stop.
+    """
+    if not destinations:
+        return []
+
+    # Source is index 0 (origin); destinations follow.
+    coords = f"{origin_lon},{origin_lat};" + ";".join(
+        f"{d['lon']},{d['lat']}" for d in destinations
+    )
+    url = f"{OSRM_TABLE_URL}/{coords}"
+    params = {"sources": "0", "annotations": "duration,distance"}
+
+    try:
+        resp = requests.get(url, params=params, timeout=20)
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("code") != "Ok" or not data.get("durations"):
+            return [None] * len(destinations)
+    except Exception:
+        return [None] * len(destinations)
+
+    durations = data["durations"][0]          # row for source 0: [self, d1, d2, ...]
+    dist_rows = data.get("distances") or [[]]
+    distances = dist_rows[0] if dist_rows else []
+
+    result = []
+    for i in range(len(destinations)):
+        dur = durations[i + 1] if i + 1 < len(durations) else None
+        if dur is None:
+            result.append(None)
+            continue
+        dist = distances[i + 1] if i + 1 < len(distances) else None
+        result.append({"duration": dur, "distance": dist})
+    return result
+
+
 def get_route(origin_lat, origin_lon, dest_lat, dest_lon):
-    url = f"{OSRM_URL}/{origin_lon},{origin_lat};{dest_lon},{dest_lat}"
+    url = f"{OSRM_ROUTE_URL}/{origin_lon},{origin_lat};{dest_lon},{dest_lat}"
     params = {"overview": "full", "geometries": "geojson"}
     try:
         resp = requests.get(url, params=params, timeout=10)

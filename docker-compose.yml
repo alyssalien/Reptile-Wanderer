@@ -1,0 +1,9 @@
+services:
+  reptile-wanderer:
+    build: .
+    ports:
+      - "5001:5001"
+    volumes:
+      # Persist community reports across container restarts
+      - ./data:/app/data
+    restart: unless-stopped

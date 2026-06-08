@@ -3,8 +3,13 @@ __pycache__/
 *.pyo
 .env
 .claude/
+.git/
+.gitignore
 static/map.html
 static/maps/
 data/reports.db
 data/reports.db-wal
 data/reports.db-shm
+tests/
+README.md
+*.md

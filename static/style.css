@@ -284,7 +284,7 @@ body {
   cursor: pointer;
 }
 .result-rank { font-size: 1.4rem; flex-shrink: 0; }
-.result-body { flex: 1; min-width: 0; }
+.result-body { flex: 1; min-width: 0; cursor: pointer; }
 .result-name { font-weight: 700; font-size: 1rem; color: var(--text-dark); }
 .result-tags { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 4px 0; }
 .result-meta { font-size: .88rem; color: var(--text-mid); }

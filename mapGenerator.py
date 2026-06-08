@@ -1,6 +1,7 @@
 import folium
 import json
 import os
+from html import escape
 
 MAP_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "map.html")
 HOT_ROADS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "hotRoads.geojson")
@@ -88,8 +89,10 @@ def _build_banners(m, weather, species):
 
 def build_map(origin, ranked_candidates, species, weather,
               danger_reports, recommend_reports,
-              top_geometry=None, multi_stop_routes=None, multi_stop_ordered=None):
-    os.makedirs(os.path.dirname(MAP_PATH), exist_ok=True)
+              top_geometry=None, multi_stop_routes=None, multi_stop_ordered=None,
+              map_path=None):
+    out_path = map_path or MAP_PATH
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
     m = folium.Map(
         location=[origin["lat"], origin["lon"]],
@@ -170,7 +173,7 @@ def build_map(origin, ranked_candidates, species, weather,
         shaded_txt = "✅ 有遮蔭" if c.get("is_shaded") else "☀️ 無遮蔭"
         popup_html = (
             f"<div style='min-width:160px;'>"
-            f"<b>{rank}{c['name']}</b><br>"
+            f"<b>{rank}{escape(str(c['name']))}</b><br>"
             f"🏷️ {CATEGORY_LABEL.get(c['category'], c['category'])}&nbsp;&nbsp;{shaded_txt}<br>"
             f"🚶 步行時間: <b>{c['walk_min']:.1f} 分鐘</b><br>"
             f"📏 距離: {c.get('distance_m', 0):.0f} 公尺<br>"
@@ -181,28 +184,31 @@ def build_map(origin, ranked_candidates, species, weather,
             location=[c["lat"], c["lon"]],
             popup=folium.Popup(popup_html, max_width=210),
             icon=_div_icon(species_emoji, size=28),
-            tooltip=f"{rank}{c['name']} ({c['walk_min']:.1f} 分)",
+            tooltip=f"{rank}{escape(str(c['name']))} ({c['walk_min']:.1f} 分)",
         ).add_to(m)
 
     # --- Multi-stop numbered markers ---
     if multi_stop_ordered:
         for i, stop in enumerate(multi_stop_ordered):
+            stop_name = escape(str(stop["name"]))
             folium.Marker(
                 location=[stop["lat"], stop["lon"]],
                 popup=folium.Popup(
-                    f"<b>站點 {i + 1}：{stop['name']}</b>", max_width=180
+                    f"<b>站點 {i + 1}：{stop_name}</b>", max_width=180
                 ),
                 icon=_numbered_icon(i + 1),
-                tooltip=f"站點 {i + 1}: {stop['name']}",
+                tooltip=f"站點 {i + 1}: {stop_name}",
             ).add_to(m)
 
     # --- Community danger markers ---
     for dr in danger_reports:
+        dr_loc = escape(str(dr.get("location_name", "")))
+        dr_desc = escape(str(dr.get("description", "")))
         popup_html = (
             f"<div style='min-width:180px;'>"
             f"<b>⚠️ 危險回報</b><br>"
-            f"📍 {dr.get('location_name','')}<br>"
-            f"📝 {dr.get('description','')}<br>"
+            f"📍 {dr_loc}<br>"
+            f"📝 {dr_desc}<br>"
             f"👍 {dr.get('upvotes',0)}&nbsp;&nbsp;👎 {dr.get('downvotes',0)}<br>"
             f"<button onclick=\"voteReport('{dr['id']}','up')\" "
             f"style='margin:3px 2px;padding:3px 10px;cursor:pointer;border-radius:4px;'>👍 讚</button>"
@@ -214,16 +220,18 @@ def build_map(origin, ranked_candidates, species, weather,
             location=[dr["lat"], dr["lon"]],
             popup=folium.Popup(popup_html, max_width=230),
             icon=_div_icon("🐕", size=28),
-            tooltip=f"⚠️ {dr.get('location_name','危險')}",
+            tooltip=f"⚠️ {dr_loc or '危險'}",
         ).add_to(m)
 
     # --- Community recommend markers ---
     for rr in recommend_reports:
+        rr_loc = escape(str(rr.get("location_name", "")))
+        rr_desc = escape(str(rr.get("description", "")))
         popup_html = (
             f"<div style='min-width:180px;'>"
             f"<b>✅ 推薦回報</b><br>"
-            f"📍 {rr.get('location_name','')}<br>"
-            f"📝 {rr.get('description','')}<br>"
+            f"📍 {rr_loc}<br>"
+            f"📝 {rr_desc}<br>"
             f"👍 {rr.get('upvotes',0)}&nbsp;&nbsp;👎 {rr.get('downvotes',0)}<br>"
             f"<button onclick=\"voteReport('{rr['id']}','up')\" "
             f"style='margin:3px 2px;padding:3px 10px;cursor:pointer;border-radius:4px;'>👍 讚</button>"
@@ -235,9 +243,22 @@ def build_map(origin, ranked_candidates, species, weather,
             location=[rr["lat"], rr["lon"]],
             popup=folium.Popup(popup_html, max_width=230),
             icon=_div_icon("🌿", size=28),
-            tooltip=f"✅ {rr.get('location_name','推薦')}",
+            tooltip=f"✅ {rr_loc or '推薦'}",
         ).add_to(m)
 
     m.get_root().html.add_child(folium.Element(VOTE_JS))
-    m.save(MAP_PATH)
-    return MAP_PATH
+
+    # Let the parent page pan/zoom this map: postMessage({type:'flyTo', lat, lon})
+    fly_js = (
+        "<script>"
+        "window.addEventListener('message', function(e) {"
+        "  if (e.data && e.data.type === 'flyTo') {"
+        f"    try {{ {m.get_name()}.flyTo([e.data.lat, e.data.lon], 17); }} catch (err) {{}}"
+        "  }"
+        "});"
+        "</script>"
+    )
+    m.get_root().html.add_child(folium.Element(fly_js))
+
+    m.save(out_path)
+    return out_path

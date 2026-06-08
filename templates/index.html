@@ -274,7 +274,7 @@ function renderResults(results, weather) {
           <input type="checkbox" class="result-checkbox" data-idx="${i}" onchange="onStopToggle()" />
         </label>
         <div class="result-rank">${emoji} #${i + 1}</div>
-        <div class="result-body">
+        <div class="result-body" onclick="flyToResult(${i})" title="點擊在地圖上定位">
           <div class="result-name">${r.name}</div>
           <div class="result-tags">
             <span class="tag cat-tag">${CATEGORY_LABEL[r.category] || r.category}</span>
@@ -305,6 +305,15 @@ function toggleSelectAll() {
   document.querySelectorAll('.result-checkbox').forEach(cb => { cb.checked = allSelected; });
   document.getElementById('select-all-btn').textContent = allSelected ? '取消全選' : '全選';
   onStopToggle();
+}
+
+// ===================== FLY MAP TO RESULT =====================
+function flyToResult(idx) {
+  const r = lastResults[idx];
+  if (!r) return;
+  const frame = document.getElementById('map-frame');
+  frame.contentWindow.postMessage({type: 'flyTo', lat: r.lat, lon: r.lon}, '*');
+  frame.scrollIntoView({behavior: 'smooth', block: 'center'});
 }
 
 // ===================== MULTI-STOP OPTIMIZE =====================
