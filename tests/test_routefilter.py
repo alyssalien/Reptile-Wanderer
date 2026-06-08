@@ -82,6 +82,15 @@ def test_suitability_within_1_to_5():
         assert 1.0 <= c["suitability"] <= 5.0
 
 
+def test_closer_destination_scores_higher():
+    cands = [_c(name="near", category="park", is_shaded=True, walk_min=2),
+             _c(name="far", category="park", is_shaded=True, walk_min=14)]
+    ranked = rf.filter_and_rank(cands, "gecko", 15, False, 0, 60, [], [])
+    assert ranked[0]["name"] == "near"
+    by_name = {c["name"]: c["suitability"] for c in ranked}
+    assert by_name["near"] > by_name["far"]   # same habitat, nearer rates higher
+
+
 def test_better_fit_scores_higher():
     cands = [_c(name="shade", category="forest", is_shaded=True),
              _c(name="sun", category="grass", is_shaded=False)]

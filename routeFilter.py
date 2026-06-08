@@ -51,6 +51,18 @@ UV_GOOD_BEARDIE = 3  # beardie and tortoise benefit from moderate UV exposure
 # so it nudges ranking without burying a better species-fit destination.
 RATING_WEIGHT = 0.4
 
+# Distance/closeness weighting: a nearer destination scores higher. We map walk
+# time linearly within the user's threshold — 0 min → full bonus, at the limit → 0.
+WALK_WEIGHT = 2.0
+
+
+def _walk_bonus(walk_min, max_walk_min):
+    if not max_walk_min:
+        return 0.0
+    closeness = max(0.0, (max_walk_min - walk_min) / max_walk_min)
+    return closeness * WALK_WEIGHT
+
+
 # Map the raw species_score onto a friendly 1.0–5.0 "suitability" rating for display.
 # The raw score realistically spans roughly -2 (penalised/poor fit) to +6 (ideal habitat).
 SUITABILITY_LO = -2.0
@@ -129,8 +141,12 @@ def filter_and_rank(candidates, species, max_walk_min, is_hot, uv_index, humidit
 
     for c in valid:
         base = _species_score(c, species, is_hot, uv_index, danger_reports, recommend_reports)
-        # Fold the (usually sparse) OSM rating in as a bonus rather than the top key
-        c["species_score"] = base + c.get("rating", 0) * RATING_WEIGHT
+        # Final score = habitat fit + OSM rating bonus + closeness bonus
+        c["species_score"] = (
+            base
+            + c.get("rating", 0) * RATING_WEIGHT
+            + _walk_bonus(c["walk_min"], max_walk_min)
+        )
         # Friendly 1–5 suitability rating for display
         c["suitability"] = _suitability_stars(c["species_score"])
 
