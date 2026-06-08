@@ -73,7 +73,10 @@ def geocode(address):
         return _geocode_cache[address]
 
     time.sleep(1)  # Nominatim public API: max 1 req/sec
-    params = {"q": address, "format": "json", "limit": 1, "addressdetails": 1}
+    # countrycodes=tw keeps results in Taiwan — otherwise "清華大學" matches
+    # the more prominent Tsinghua University in Beijing instead of NTHU in Hsinchu.
+    params = {"q": address, "format": "json", "limit": 1,
+              "addressdetails": 1, "countrycodes": "tw"}
     try:
         resp = requests.get(NOMINATIM_URL, params=params, headers=HEADERS, timeout=10)
         resp.raise_for_status()
