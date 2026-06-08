@@ -1,13 +1,18 @@
-import requests
+import json
+import os
 import time
 
+import requests
+
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-# Multiple Overpass mirrors — the public ones overload often (HTTP 504). We try
-# them in order and fail over, so one busy server no longer breaks every search.
+# Multiple Overpass mirrors — the public ones overload often (HTTP 504). We race
+# them all in parallel, so one busy server no longer breaks every search.
 OVERPASS_URLS = [
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
     "https://overpass.private.coffee/api/interpreter",
+    "https://overpass.osm.ch/api/interpreter",
+    "https://overpass.openstreetmap.fr/api/interpreter",
 ]
 OSRM_BASE = "http://router.project-osrm.org"
 OSRM_ROUTE_URL = f"{OSRM_BASE}/route/v1/foot"
@@ -105,10 +110,35 @@ class OverpassUnavailable(Exception):
     """Raised when every Overpass mirror fails — distinct from 'genuinely no results'."""
 
 
-# Short-lived cache of successful Overpass responses, so repeating the same
-# search (or retrying after a hiccup) is instant instead of hitting the network.
-_overpass_cache = {}
-OVERPASS_CACHE_TTL = 600  # 10 minutes
+# Persistent cache of successful Overpass responses. Repeating a search is instant,
+# AND — crucially — once an area has been fetched once, it keeps working even when
+# every public Overpass mirror is down (we serve the stale copy rather than fail).
+OVERPASS_CACHE_TTL = 600  # 10 minutes considered "fresh"
+OVERPASS_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                   "data", "overpass_cache.json")
+_overpass_cache = None  # lazy-loaded {keystr: {"data":..., "ts":...}}
+
+
+def _load_overpass_cache():
+    global _overpass_cache
+    if _overpass_cache is None:
+        try:
+            with open(OVERPASS_CACHE_FILE, "r", encoding="utf-8") as f:
+                _overpass_cache = json.load(f)
+        except Exception:
+            _overpass_cache = {}
+    return _overpass_cache
+
+
+def _save_overpass_cache():
+    try:
+        os.makedirs(os.path.dirname(OVERPASS_CACHE_FILE), exist_ok=True)
+        tmp = OVERPASS_CACHE_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(_overpass_cache, f)
+        os.replace(tmp, OVERPASS_CACHE_FILE)
+    except Exception:
+        pass
 
 
 def _overpass_query_one(url, query):
@@ -116,6 +146,28 @@ def _overpass_query_one(url, query):
     resp = requests.post(url, data={"data": query}, headers=HEADERS, timeout=(5, 25))
     resp.raise_for_status()
     return resp.json()
+
+
+def _fetch_overpass(query):
+    """Race every mirror in parallel; return the first success or raise."""
+    import concurrent.futures
+    data = None
+    last_error = None
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=len(OVERPASS_URLS))
+    try:
+        futures = [executor.submit(_overpass_query_one, url, query) for url in OVERPASS_URLS]
+        for fut in concurrent.futures.as_completed(futures):
+            try:
+                data = fut.result()
+                break  # first success wins; ignore the slower mirrors
+            except Exception as e:
+                last_error = e
+    finally:
+        executor.shutdown(wait=False)  # don't block on the losing requests
+
+    if data is None:
+        raise OverpassUnavailable(f"all Overpass mirrors failed: {last_error}")
+    return data
 
 
 def find_nearby(lat, lon, categories, radius=1500):
@@ -128,36 +180,23 @@ def find_nearby(lat, lon, categories, radius=1500):
     if not conditions:
         return []
 
-    # Serve a recent identical search from cache
-    cache_key = (round(lat, 3), round(lon, 3), tuple(sorted(categories)), radius)
-    cached = _overpass_cache.get(cache_key)
-    if cached and (time.time() - cached["ts"]) < OVERPASS_CACHE_TTL:
-        data = cached["data"]
+    cache = _load_overpass_cache()
+    cache_key = f"{round(lat, 3)},{round(lon, 3)}|{','.join(sorted(categories))}|{radius}"
+    entry = cache.get(cache_key)
+
+    if entry and (time.time() - entry["ts"]) < OVERPASS_CACHE_TTL:
+        data = entry["data"]                      # fresh cache hit
     else:
-        # Lower server-side timeout so a busy mirror gives up sooner
         query = f"[out:json][timeout:25];({''.join(conditions)});out center 60;"
-
-        # Race all mirrors AT ONCE — the first healthy one wins, so we wait for the
-        # fastest server rather than timing each out one-by-one.
-        import concurrent.futures
-        data = None
-        last_error = None
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=len(OVERPASS_URLS))
         try:
-            futures = [executor.submit(_overpass_query_one, url, query) for url in OVERPASS_URLS]
-            for fut in concurrent.futures.as_completed(futures):
-                try:
-                    data = fut.result()
-                    break  # first success wins; ignore the slower mirrors
-                except Exception as e:
-                    last_error = e
-        finally:
-            executor.shutdown(wait=False)  # don't block on the losing requests
-
-        if data is None:
-            raise OverpassUnavailable(f"all Overpass mirrors failed: {last_error}")
-
-        _overpass_cache[cache_key] = {"data": data, "ts": time.time()}
+            data = _fetch_overpass(query)
+            cache[cache_key] = {"data": data, "ts": time.time()}
+            _save_overpass_cache()
+        except OverpassUnavailable:
+            if entry:
+                data = entry["data"]              # all mirrors down → serve stale copy
+            else:
+                raise                             # never fetched this area → give up
 
     candidates = []
     seen = set()

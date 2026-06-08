@@ -9,3 +9,4 @@ static/maps/
 data/reports.db
 data/reports.db-wal
 data/reports.db-shm
+data/overpass_cache.json

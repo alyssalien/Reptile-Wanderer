@@ -63,8 +63,10 @@ class _OverpassResp:
 
 
 @pytest.fixture(autouse=True)
-def _clear_overpass_cache():
-    api._overpass_cache.clear()
+def _isolate_overpass_cache(tmp_path, monkeypatch):
+    # Fresh in-memory + disk cache per test (no leakage, no real file writes)
+    monkeypatch.setattr(api, "_overpass_cache", {})
+    monkeypatch.setattr(api, "OVERPASS_CACHE_FILE", str(tmp_path / "overpass_cache.json"))
     yield
 
 
@@ -99,6 +101,23 @@ def test_find_nearby_raises_when_all_mirrors_fail(monkeypatch):
     monkeypatch.setattr(api.requests, "post", post)
     with pytest.raises(api.OverpassUnavailable):
         api.find_nearby(24.8, 121.0, ["park"])
+
+
+def test_find_nearby_serves_stale_cache_when_mirrors_down(monkeypatch):
+    # 1) First search succeeds and is cached
+    monkeypatch.setattr(api.requests, "post", lambda url, **k: _OverpassResp(True))
+    first = api.find_nearby(24.8, 121.0, ["park"])
+    assert len(first) == 1
+
+    # 2) Force the cached entry to look expired, then make all mirrors fail
+    key = next(iter(api._overpass_cache))
+    api._overpass_cache[key]["ts"] = 0
+    monkeypatch.setattr(api.requests, "post",
+                        lambda url, **k: (_ for _ in ()).throw(RuntimeError("504")))
+
+    # 3) Still returns the stale copy instead of erroring
+    out = api.find_nearby(24.8, 121.0, ["park"])
+    assert len(out) == 1 and out[0]["category"] == "park"
 
 
 def test_find_nearby_no_categories_returns_empty():
