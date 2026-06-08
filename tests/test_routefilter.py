@@ -73,22 +73,22 @@ def test_haversine_zero_distance():
     assert rf._haversine_m(24.8, 121.0, 24.8, 121.0) == 0
 
 
-# --- Hard per-species environment rules ---------------------------------------
-def test_gecko_only_shaded_locations():
+# --- Per-species habitat preference (rank, don't exclude) ---------------------
+def test_gecko_prefers_shade_but_keeps_unshaded():
     cands = [_c(name="sun", is_shaded=False), _c(name="shade", is_shaded=True)]
-    ranked = rf.filter_and_rank(cands, "gecko", 15, False, 0, 60, [], [])
-    names = [c["name"] for c in ranked]
-    assert names == ["shade"]   # unshaded excluded entirely
+    names = [c["name"] for c in rf.filter_and_rank(cands, "gecko", 15, False, 0, 60, [], [])]
+    assert names == ["shade", "sun"]   # shaded first, unshaded still listed (not empty)
 
 
-def test_tortoise_flat_terrain_only():
-    cands = [_c(name="grass", category="grass"), _c(name="park", category="park"),
-             _c(name="forest", category="forest"), _c(name="shop", category="convenience")]
-    names = {c["name"] for c in rf.filter_and_rank(cands, "tortoise", 15, False, 0, 60, [], [])}
-    assert names == {"grass", "park"}   # forest (uneven) & shop (busy) excluded
+def test_tortoise_prefers_flat_terrain():
+    cands = [_c(name="forest", category="forest"), _c(name="grass", category="grass")]
+    ranked = rf.filter_and_rank(cands, "tortoise", 15, False, 0, 60, [], [])
+    assert ranked[0]["name"] == "grass"   # flat ground ranks above uneven forest
+    assert len(ranked) == 2               # forest still present
 
 
-def test_beardie_excludes_busy_convenience():
-    cands = [_c(name="park", category="park"), _c(name="shop", category="convenience")]
-    names = {c["name"] for c in rf.filter_and_rank(cands, "beardie", 15, False, 0, 60, [], [])}
-    assert names == {"park"}   # quiet areas only; busy shop excluded
+def test_beardie_deprioritises_busy_convenience():
+    cands = [_c(name="shop", category="convenience"), _c(name="park", category="park")]
+    ranked = rf.filter_and_rank(cands, "beardie", 15, False, 0, 60, [], [])
+    assert ranked[0]["name"] == "park"    # quiet park first
+    assert len(ranked) == 2               # busy shop still present

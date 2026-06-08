@@ -25,6 +25,13 @@ SPECIES_CATEGORY_BONUS = {
     },
 }
 
+# Habitat-preference penalties: push unsuitable spots DOWN the ranking without
+# excluding them, so each species' ideal terrain floats to the top.
+UNSHADED_PENALTY_GECKO = 3.0       # gecko (nocturnal) strongly prefers shade/shelter
+NONFLAT_PENALTY_TORTOISE = 3.0     # tortoise needs flat ground (grass / open park)
+BUSY_PENALTY_BEARDIE = 3.0         # beardie prefers quiet, low-traffic open spaces
+TORTOISE_FLAT_CATEGORIES = {"grass", "park"}
+
 HOT_UNSHADED_PENALTY_GECKO = 3.5   # gecko in hot weather avoids unshaded spots
 DOG_DANGER_RADIUS_M = 200          # beardie avoids dog reports within this radius
 DOG_PENALTY_BEARDIE = 5.0
@@ -54,19 +61,29 @@ def _haversine_m(lat1, lon1, lat2, lon2):
 
 
 def _species_score(candidate, species, is_hot, uv_index, danger_reports, recommend_reports):
-    score = SPECIES_CATEGORY_BONUS.get(species, {}).get(candidate.get("category", "park"), 0.5)
+    category = candidate.get("category", "park")
+    score = SPECIES_CATEGORY_BONUS.get(species, {}).get(category, 0.5)
     is_shaded = candidate.get("is_shaded", False)
     c_lat, c_lon = candidate["lat"], candidate["lon"]
 
-    # Gecko: penalise unshaded spots when hot or UV is high
+    # Gecko (nocturnal): prefers shade; penalise unshaded, extra so when hot / high UV
     if species == "gecko":
+        if not is_shaded:
+            score -= UNSHADED_PENALTY_GECKO
         if is_hot and not is_shaded:
             score -= HOT_UNSHADED_PENALTY_GECKO
         if uv_index >= UV_HIGH_GECKO and not is_shaded:
             score -= 2.0
 
-    # Beardie: strongly avoids dog danger reports within 200 m
+    # Tortoise: needs flat ground — deprioritise uneven forest / campus / shops
+    if species == "tortoise" and category not in TORTOISE_FLAT_CATEGORIES:
+        score -= NONFLAT_PENALTY_TORTOISE
+
+    # Beardie: prefers quiet open space — deprioritise busy convenience stores...
     if species == "beardie":
+        if category == "convenience":
+            score -= BUSY_PENALTY_BEARDIE
+        # ...and strongly avoids dog danger reports within 200 m
         for dr in danger_reports:
             if "dog" in dr.get("description", "").lower() or "狗" in dr.get("description", ""):
                 dist = _haversine_m(c_lat, c_lon, dr["lat"], dr["lon"])
@@ -92,40 +109,12 @@ def _species_score(candidate, species, is_hot, uv_index, danger_reports, recomme
     return score
 
 
-# Hard per-species environment rules (the location set each species may use AT ALL).
-# These are categorical constraints that EXCLUDE unsuitable spots — the soft scoring
-# above then only ranks the survivors. Categories: park / grass / forest / campus / convenience.
-SPECIES_ALLOWED_CATEGORIES = {
-    # Tortoise — flat terrain only: open grass & flat parks. No uneven forest, no busy shops.
-    "tortoise": {"grass", "park"},
-    # Beardie — quiet, low-traffic open areas. Everything except busy convenience stores.
-    "beardie": {"park", "grass", "forest", "campus"},
-    # Gecko has no category whitelist; it is constrained by shade instead (see below).
-}
-
-
-def _species_allowed(candidate, species):
-    """Return True if this destination satisfies the species' hard environment rule."""
-    cat = candidate.get("category", "park")
-
-    if species == "gecko":
-        # Nocturnal: only shaded / sheltered spots (shaded parks, tree-lined paths).
-        # Avoids heat and strong light by construction.
-        return bool(candidate.get("is_shaded", False))
-
-    allowed = SPECIES_ALLOWED_CATEGORIES.get(species)
-    if allowed is not None:
-        return cat in allowed
-    return True
-
-
 def filter_and_rank(candidates, species, max_walk_min, is_hot, uv_index, humidity,
                     danger_reports, recommend_reports):
-    # Filter 1: valid OSRM walk time within the user's threshold
+    # Filter: only keep destinations with valid OSRM walk times within threshold.
+    # Habitat suitability is a strong scoring PREFERENCE (see _species_score), not a
+    # hard exclusion — so the best-fit spots rank first but results are never empty.
     valid = [c for c in candidates if c.get("walk_min") is not None and c["walk_min"] <= max_walk_min]
-
-    # Filter 2: hard per-species environment rules (only suitable habitats survive)
-    valid = [c for c in valid if _species_allowed(c, species)]
 
     for c in valid:
         base = _species_score(c, species, is_hot, uv_index, danger_reports, recommend_reports)
