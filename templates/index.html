@@ -111,6 +111,19 @@
   </p>
 </section>
 
+<!-- ===== FAVORITES SECTION ===== -->
+<section class="favorites-section" id="favorites-section">
+  <div class="favorites-header">
+    <h2>⭐ 我的收藏地點</h2>
+    <button class="btn btn-danger" id="clear-favorites-btn" onclick="clearAllFavorites()" style="display:none;">
+      🗑️ 清除全部
+    </button>
+  </div>
+  <div id="favorites-list" class="favorites-list">
+    <p class="favorites-empty">還沒有收藏地點，在搜尋結果中點擊 ⭐ 即可收藏。</p>
+  </div>
+</section>
+
 <!-- ===== COMMUNITY REPORT PANEL ===== -->
 <section class="report-section">
   <button class="report-toggle-btn" onclick="toggleReport()">
@@ -191,7 +204,76 @@
 let currentSpecies = 'gecko';
 let lastOrigin = null;
 let lastResults = [];
+let lastWeather = null;
 let mapRefreshInterval = null;
+let favorites = JSON.parse(localStorage.getItem('rw_favorites') || '{}');
+
+// ===================== FAVORITES =====================
+function toggleFavorite(idx) {//接收一個參數 idx
+  const r = lastResults[idx];
+  if (!r) return;
+  const key = `${r.lat}_${r.lon}`;
+  if (favorites[key]) {
+    delete favorites[key];
+  } else {
+    favorites[key] = {//名稱、分類、經緯度、步行時間、距離、是否有遮蔭、評分、適合度）打包成一個新的物件，並以剛才的 key 作為屬性名稱，存進 favorites 物件中。
+      name: r.name, category: r.category,
+      lat: r.lat, lon: r.lon,
+      walk_min: r.walk_min, distance_m: r.distance_m,
+      is_shaded: r.is_shaded, rating: r.rating,
+      suitability: r.suitability,
+    };
+  }
+  localStorage.setItem('rw_favorites', JSON.stringify(favorites));//透過 JSON.stringify() 轉換成字串
+  renderResults(lastResults, lastWeather, lastResults.length);
+  renderFavorites();//即時更新畫面上收藏夾列表的內
+}
+
+function removeFavorite(key) {
+  delete favorites[key];
+  localStorage.setItem('rw_favorites', JSON.stringify(favorites));//刪除後的最新 favorites 物件轉為字串，同步更新到瀏覽器的 localStorage 中。
+  renderResults(lastResults, lastWeather, lastResults.length);
+  renderFavorites();
+}
+
+function clearAllFavorites() {
+  if (!confirm('確定要清除所有收藏地點嗎？')) return;
+  favorites = {};
+  localStorage.setItem('rw_favorites', JSON.stringify(favorites));//將空物件轉成字串，寫入 localStorage，徹底清除瀏覽器中儲存的收藏資料。
+  renderResults(lastResults, null, lastResults.length);
+  renderFavorites();
+}
+
+function renderFavorites() {
+  const list = document.getElementById('favorites-list');//透過 ID 取得 HTML 中用來放收藏列表的容器元素（<div id="favorites-list">），存入常數 list
+  const clearBtn = document.getElementById('clear-favorites-btn');
+  const items = Object.entries(favorites);//使用 Object.entries(favorites) 將 favorites 物件轉換為「鍵值對二維陣列」（格式如：[['key1', 地點物件1], ['key2', 地點物件2]]），方便後續計算數量與跑迴圈
+  clearBtn.style.display = items.length > 0 ? 'inline-flex' : 'none';//如果收藏數量大於 0（items.length > 0），就將清除按鈕的 CSS 設為 inline-flex（顯示）
+  if (items.length === 0) {
+    list.innerHTML = '<p class="favorites-empty">還沒有收藏地點，在搜尋結果中點擊 ⭐ 即可收藏。</p>';
+    return;
+  }
+  list.innerHTML = items.map(([key, r]) => {//如果有點訊，開始更新 list 的內部 HTML。利用 .map() 遍歷剛才轉換的 items 陣列，並透過解構賦值直接拿到 key（識別碼）與 r（地點資料物件）。
+    const shaded = r.is_shaded
+      ? '<span class="tag shaded">✅ 有遮蔭</span>'
+      : '<span class="tag unshaded">☀️ 無遮蔭</span>';
+    const rating = r.rating ? `⭐ ${r.rating}` : '⭐ -';
+    return `
+      <div class="fav-card">
+        <div class="fav-body">
+          <div class="result-name">${escapeHtml(r.name)}</div>
+          <div class="result-tags">
+            <span class="tag suit-tag">🎯 適合度 <b>${r.suitability ?? '-'}</b>/5 <span class="stars">${renderStars(r.suitability)}</span></span>
+            <span class="tag cat-tag">${CATEGORY_LABEL[r.category] || r.category}</span>
+            ${shaded}
+            <span class="tag osm-rating">OSM ${rating}</span>
+          </div>
+          <div class="result-meta">🚶 <b>${r.walk_min} 分鐘</b> &nbsp;|&nbsp; 📏 ${r.distance_m} 公尺</div>
+        </div>
+        <button class="fav-remove-btn" onclick="removeFavorite('${key}')" title="移除收藏">✕</button>
+      </div>`;
+  }).join('');
+}
 
 // ===================== SPECIES =====================
 function selectSpecies(btn) {
@@ -243,6 +325,7 @@ async function doSearch() {
 
     lastOrigin = data.origin;
     lastResults = data.results;
+    lastWeather = data.weather;
     renderResults(data.results, data.weather, data.total_matched);
     updateWeatherBanner(data.weather);
     refreshMap();
@@ -299,6 +382,8 @@ function renderResults(results, weather, totalMatched) {
     const rating = r.rating ? `⭐ ${r.rating}` : '⭐ -';
     const isHotWarn = weather?.is_hot && !r.is_shaded && currentSpecies === 'gecko'
       ? '<span class="tag hot-warn">🔥 高溫注意</span>' : '';
+    const favKey = `${r.lat}_${r.lon}`;
+    const isFaved = !!favorites[favKey];
     return `
       <div class="result-card" data-idx="${i}">
         <label class="result-checkbox-wrap">
@@ -317,6 +402,9 @@ function renderResults(results, weather, totalMatched) {
             🚶 <b>${r.walk_min} 分鐘</b> &nbsp;|&nbsp; 📏 ${r.distance_m} 公尺
           </div>
         </div>
+        <button class="fav-btn ${isFaved ? 'faved' : ''}" onclick="toggleFavorite(${i})" title="${isFaved ? '取消收藏' : '加入收藏'}">
+          ${isFaved ? '⭐' : '☆'}
+        </button>
       </div>
     `;
   }).join('');
@@ -589,8 +677,9 @@ document.getElementById('address-input').addEventListener('keydown', e => {
   if (e.key === 'Enter') doSearch();
 });
 
-// Load the community message board on page load
+// Load the community message board and favorites on page load
 loadReports();
+renderFavorites();
 </script>
 </body>
 </html>
